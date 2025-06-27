@@ -1,5 +1,5 @@
 #!/bin/bash
-path="documentation/DGKernel"
+path="."
 
 # Create parent directory if it doesn't exist
 mkdir -p "$path"
