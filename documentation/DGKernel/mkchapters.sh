@@ -9,8 +9,9 @@ for dir in \
 "1 - Element Definition" \
 "2 - Operators" \
 "3 - Meshes - Connecting the Elements to Input" \
-"3 - Fields - Input and Output" \
-"4 - Kernel Building" \
+"4 - Partitioning - Parallelism and Mixed Meshes" \
+"5 - Fields - Input and Output" \
+"6 - Kernel Building" \
 "5 - Methods - Putting it all together" \
 "A - Example - Scalar Burgers Equation" \
 "B - Example - Eulers Equations" \
