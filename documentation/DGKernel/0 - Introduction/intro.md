@@ -5,11 +5,13 @@
 Modern computational physics exists at the intersection of three domains: mathematical formulations, numerical algorithms, and hardware architectures. Each domain has its own abstractions, constraints, and optimal patterns. The challenge lies not in any single domain, but in effectively bridging between them.
 
 Consider element-based methods for solving partial differential equations. Mathematically, they involve:
+
 - Basis functions defined on reference elements
 - Operators for differentiation and integration
 - Coupling between elements through interfaces
 
 Computationally, achieving performance requires:
+
 - Coalesced memory access on GPUs
 - Cache-blocking on CPUs
 - Minimized communication in distributed systems
@@ -19,9 +21,10 @@ Most existing frameworks force a choice: either work at the mathematical level a
 
 ## What DGKernel Provides
 
-DGKernel is a kernel generation system that bridges this gap through a focused computational model. It is built on a key simplifying assumption: **problems can be decomposed into partitions that communicate only through element faces**. This discontinuous Galerkin-inspired model (hence "DG" in DGKernel) enables a clean mapping between mathematical elements and parallel hardware.
+DGKernel is a kernel generation system that bridges this gap through a focused computational model. It is built on a key simplifying assumption: **problems can be decomposed into partitions that communicate only through element faces**. This discontinuous Galerkin-inspired model (hence “DG” in DGKernel) enables a clean mapping between mathematical elements and parallel hardware.
 
-The system leverages OCCA's kernel abstraction to target both SMP and GPU architectures through a restricted but powerful parallel model:
+The system leverages OCCA’s kernel abstraction to target both SMP and GPU architectures through a restricted but powerful parallel model:
+
 - **@outer loops** map to partitions (thread blocks on GPU, parallel regions on CPU)
 - **@inner loops** map to elements within partitions (threads on GPU, vectorized loops on CPU)
 
@@ -32,11 +35,13 @@ This focused approach trades some generality for significant simplification: ele
 DGKernel operates as a two-stage system:
 
 **Stage 1: Specification**
+
 - Define elements with their mathematical properties
 - Compose operators that transform field data
 - Describe computational stages and data dependencies
 
 **Stage 2: Code Generation**
+
 - Analyze data access patterns
 - Generate architecture-specific kernels
 - Optimize memory layouts and execution strategies
@@ -47,47 +52,54 @@ This separation allows algorithm developers to work with familiar mathematical c
 
 ### Elements as Mathematical Objects
 
-In DGKernel, an element is a complete mathematical entity:
+In DGKernel, an element encapsulates the complete mathematical machinery needed for numerical computation:
 
-```go
-type Element interface {
-    // Basis functions and quadrature
-    Np() int                          // Number of points
-    N() int                           // Polynomial order
-    InterpolationMatrix() []float64   // Vandermonde matrix
-    
-    // Differentiation
-    DifferentiationMatrices() (Dr, Ds, Dt []float64)
-    
-    // Integration  
-    Mass() []float64                  // Mass matrix
-    Weights() []float64               // Quadrature weights
-    
-    // Geometry
-    ReferenceNodes() (r, s, t []float64)
-    FaceNodes() [][]int               // Node indices per face
-}
-```
+**Core attributes common to all elements:**
 
-This interface captures the mathematical structure independent of implementation details.
+- Polynomial order and basis type
+- Number of nodes, faces, and dimensions
+- Topological connectivity information
+
+**Basis representation:**
+
+- Interpolation matrices mapping between nodal and modal spaces
+- Quadrature rules for accurate integration
+- Face-to-volume lifting operators
+
+**Geometric mappings:**
+
+- Metric tensor components (rx, ry, rz, sx, sy, sz, tx, ty, tz)
+- Jacobian transformations between reference and physical space
+- Surface normal vectors and area scalings
+
+**Mathematical operators:**
+
+- Differentiation matrices in reference coordinates
+- Mass and stiffness matrices
+- Specialized operators for the element’s basis functions
+
+These components form a complete mathematical description that the DGKernel system uses to generate efficient computational kernels. The element designer provides these mathematical building blocks once, and they become available to all algorithm developers through the operator contract system.
 
 ### Separation of Concerns
 
 A critical design principle in DGKernel is the separation between element design and algorithm development:
 
-**Element Designer's Role:**
+**Element Designer’s Role:**
+
 - Define mathematical properties (basis functions, quadrature, etc.)
 - Map these to granular operator contracts (Gradient, Divergence, Mass, LIFT)
 - Each operator has clear input/output specifications
 - This mapping is done once per element type
 
-**Algorithm Developer's Role:**
+**Algorithm Developer’s Role:**
+
 - Compose operators within OCCA kernel code to implement physics
 - Write C-like code that calls operators as building blocks
 - Focus on the mathematical algorithm, not operator implementation
 - Work at the level of physics equations
 
 For example, an algorithm developer might write:
+
 ```c
 @kernel void computeRHS(...) {
     for (int p = 0; p < Npartitions; ++p; @outer) {
@@ -115,7 +127,8 @@ DGKernel ensures the operators have access to properly sized and strided arrays 
 
 ### Historical Context
 
-The idea of separating numerical methods from implementation details isn't new. Starting in the 1990s, several C++ projects attempted this goal:
+The idea of separating numerical methods from implementation details isn’t new. Starting in the 1990s, several C++ projects attempted this goal:
+
 - Template-based libraries from MIT and other institutions
 - Object-oriented finite element frameworks
 - Expression template systems
@@ -123,6 +136,7 @@ The idea of separating numerical methods from implementation details isn't new. 
 However, these systems struggled to gain widespread adoption due to their inherent complexity. Template metaprogramming, multiple inheritance, and complex build systems created barriers to entry that limited their audience to C++ experts.
 
 Modern languages like Go provide a different path. With:
+
 - Simple, readable syntax
 - Fast compilation
 - Built-in concurrency primitives
@@ -135,12 +149,14 @@ Go allows DGKernel to achieve the same flexibility as earlier C++ systems but wi
 The Face Buffer manages communication between elements through their faces:
 
 **Design characteristics:**
+
 - Elements within a partition communicate through face interfaces
 - Face data organized for flux computation
 - Contiguous send/receive buffers for MPI communication
 - Enables efficient distributed computing across multiple nodes
 
 **Memory layout:**
+
 - Face values stored in arrays sized by partition element count
 - Send buffers packed with face data for remote partitions
 - Receive buffers hold incoming face data from other partitions
@@ -159,13 +175,14 @@ DGKernel provides explicit control over memory allocation and layout:
 - **Communication buffers**: Explicitly managed for MPI/GPU transfers
 
 The system computes optimal layouts based on:
+
 - Access patterns in operators
 - Architecture memory hierarchy
 - Communication requirements
 
 ### Parallelization Strategy
 
-The framework uses OCCA's two-level parallelization model:
+The framework uses OCCA’s two-level parallelization model:
 
 ```c
 // OCCA kernel structure
@@ -179,6 +196,7 @@ for (int p = 0; p < Npartitions; ++p; @outer) {
 ```
 
 This maps directly to hardware:
+
 - **GPU**: @outer → thread blocks, @inner → threads
 - **CPU**: @outer → parallel regions, @inner → vectorized loops
 
@@ -203,7 +221,7 @@ for (int p = 0; p < Npartitions; ++p; @outer) {
 // - HIP: Thread blocks and threads
 ```
 
-DGKernel focuses on structuring computations to work well with OCCA's model, while OCCA handles all hardware-specific translation.
+DGKernel focuses on structuring computations to work well with OCCA’s model, while OCCA handles all hardware-specific translation.
 
 ## Design Philosophy
 
@@ -212,6 +230,7 @@ DGKernel focuses on structuring computations to work well with OCCA's model, whi
 A significant benefit of the operator contract system is how it enables element-agnostic algorithm development:
 
 **Unified algorithm expression:**
+
 ```c
 @kernel void computeFlowRHS(...) {
     // This kernel works for ANY element type
@@ -226,6 +245,7 @@ A significant benefit of the operator contract system is how it enables element-
 ```
 
 **Automatic mortar coupling:**
+
 - Mixed element meshes use different partitions for different element types
 - Element developers implement mortar methods for face coupling
 - DGKernel automatically applies mortar projections at partition interfaces
@@ -238,12 +258,14 @@ For example, a mesh with tetrahedra in the boundary layer and hexahedra in the f
 While DGKernel automates common patterns, it maintains a philosophy of transparency:
 
 **Nothing is hidden:**
+
 - Face mappings remain accessible for custom flux functions
 - Operator implementations can be extended or replaced
 - Memory layouts are documented and accessible
 - Mortar coupling can be customized when needed
 
 **Progressive complexity:**
+
 - Default behavior handles most cases automatically
 - Advanced users can access lower-level components
 - Custom operators can be added alongside standard ones
@@ -253,7 +275,8 @@ This approach means researchers can start with simple, element-agnostic algorith
 
 ### OCCA as the Foundation
 
-DGKernel builds on OCCA's kernel language, which provides:
+DGKernel builds on OCCA’s kernel language, which provides:
+
 - Portable kernel syntax with @outer/@inner annotations
 - Automatic translation to CUDA, OpenMP, OpenCL, etc.
 - Just-in-time compilation with architecture-specific optimizations
@@ -263,11 +286,13 @@ This means DGKernel users write kernels once using OCCA syntax, and the system h
 ### Explicit Over Implicit
 
 DGKernel makes key aspects explicit:
+
 - Data dependencies between operations
 - Memory allocation and lifetime
 - Communication patterns
 
-This explicitness enables optimization while maintaining clarity about the numerical method being implemented, whether it's:
+This explicitness enables optimization while maintaining clarity about the numerical method being implemented, whether it’s:
+
 - Strong form collocation (pointwise enforcement of PDEs)
 - Weak form Galerkin methods (integral formulations)
 - Spectral methods (modal basis functions)
@@ -279,6 +304,7 @@ The same infrastructure supports all these approaches because they share common 
 ### Composition Over Monolithic Solutions
 
 Rather than providing complete solvers, DGKernel provides granular building blocks:
+
 - **Element-provided operators**: Gradient, Divergence, Mass, LIFT, etc.
 - **Physics-specific functions**: Flux computation, equation of state, etc.
 - **OCCA kernel code**: Combines operators to implement algorithms
@@ -289,6 +315,7 @@ This compositional approach means new physics solvers are developed by writing O
 ### Performance Through Structure
 
 High performance comes from exploiting structure:
+
 - Regular memory access patterns
 - Predictable communication
 - Amortized setup costs
@@ -297,9 +324,10 @@ The framework identifies and exploits these patterns automatically.
 
 ## Limitations and Scope
 
-DGKernel's focused model has clear boundaries:
+DGKernel’s focused model has clear boundaries:
 
 **Within Scope:**
+
 - Methods where elements communicate only through faces
 - Algorithms that fit the @outer (partition) / @inner (element) parallel model
 - Local operations within elements
@@ -308,27 +336,31 @@ DGKernel's focused model has clear boundaries:
 - Mixed element meshes (each partition has a fixed element type)
 
 **Outside Scope:**
-- Methods requiring arbitrary element-to-element communication beyond faces
-- Algorithms that don't map to the partition/element parallel structure
-- Global assembly operations that can't be decomposed
 
-These constraints enable DGKernel's key capability: automatic management of operator inputs and outputs based on adherence to operator contracts.
+- Methods requiring arbitrary element-to-element communication beyond faces
+- Algorithms that don’t map to the partition/element parallel structure
+- Global assembly operations that can’t be decomposed
+
+These constraints enable DGKernel’s key capability: automatic management of operator inputs and outputs based on adherence to operator contracts.
 
 ## Book Organization
 
 This book presents DGKernel from the ground up:
 
 **Part I: Foundations**
+
 - Chapter 1: Element Definition - Mathematical building blocks
 - Chapter 2: Operators - Computational patterns
 - Chapter 3: Meshes - Connecting elements to domains
 
-**Part II: Parallel Execution**  
+**Part II: Parallel Execution**
+
 - Chapter 4: Partitioning - Domain decomposition strategies
 - Chapter 5: Fields - Data management and I/O
 - Chapter 6: Kernel Building - Code generation process
 
 **Part III: Applications**
+
 - Chapter 7: Methods - Complete numerical schemes
 - Appendices A-D: Detailed examples from various physics domains
 
@@ -348,43 +380,36 @@ element := Tetrahedron{Order: 3}
 // - Mass: (u) → (Mu)
 // - LIFT: (faceData) → (volumeData)
 
-// 2. Algorithm developer writes OCCA kernel
-@kernel void computeBurgers(...) {
+// 2. Algorithm developer writes natural code
+@kernel void computeNavierStokes(...) {
     for (int p = 0; p < Npartitions; ++p; @outer) {
-        // Partition-level operators
-        PhysicalGradient(u, ux, uy, uz, K[part]);
-        ComputeBurgersFlux(faceValues, faceFlux, K[part]);
-        MATMUL_LIFT(faceFlux, lifted, K[part]);
-        
-        // Element-level physics
-        for (int elem = 0; elem < KpartMax; ++elem; @inner) {
-            if (elem < K[part]) {
-                // Update residual (RK stage)
-                for (int n = 0; n < NP_TET; ++n) {
-                    int id = elem * NP_TET + n;
-                    resu[id] = a * u[id] + resu[id];
-                }
-                
-                // Apply physics: div(u²/2)
-                for (int n = 0; n < NP_TET; ++n) {
-                    int id = elem * NP_TET + n;
-                    real_t divFlux = -u[id] * (ux[id] + uy[id] + uz[id]);
-                    u[id] = resu[id] + b_dt * (divFlux + lifted[id]);
-                }
-            }
+        for (int e = 0; e < ElementsPerPartition; ++e; @inner) {
+            // Natural mathematical notation - no manual indexing
+            PhysicalGradient(velocity, velocity_x, velocity_y, velocity_z);
+            
+            // DGKernel manages:
+            // - Field allocation based on operator contracts
+            // - Correct strides for this partition's element type
+            // - Memory layout optimization
+            
+            ComputeStress(velocity_x, velocity_y, velocity_z, stress);
+            Divergence(stress, stress_divergence);
+            LIFT(face_flux, volume_contribution);
+            
+            // Combine terms...
+            Add(stress_divergence, volume_contribution, rhs);
         }
     }
 }
 
-// 3. Key points:
-// - Operators like PhysicalGradient work on entire partitions
-// - Element loops handle local physics
-// - DGKernel manages array dimensions based on element type
-// - Mixed meshes: each partition can have different NP values
+// 3. Mixed element example
+// Partition 0: Tetrahedra (boundary layer)
+// Partition 1: Hexahedra (far field)
+// Same operator names, different implementations per partition
 ```
 
-The structure shows how operators handle the heavy lifting at partition level, while element loops implement the specific physics.
+The crucial point: algorithm developers use natural field names and mathematical operations. DGKernel handles all the complexity of memory management, dimensionality, and ensuring operator contracts are satisfied.
 
----
+-----
 
 *Continue to Chapter 1: Element Definition →*
