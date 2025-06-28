@@ -21,14 +21,35 @@ Most existing frameworks force a choice: either work at the mathematical level a
 
 ## What DGKernel Provides
 
-DGKernel is a kernel generation system that bridges this gap through a focused computational model. It is built on a key simplifying assumption: **problems can be decomposed into partitions that communicate only through element faces**. This discontinuous Galerkin-inspired model (hence “DG” in DGKernel) enables a clean mapping between mathematical elements and parallel hardware.
+DGKernel is a kernel generation system that bridges this gap through a focused computational model. It is built on a key principle: **problems can be decomposed into partitions where the vast majority of computation occurs locally, with consolidated communication between partitions**. This partition-centric model enables a clean mapping between mathematical elements and parallel hardware.
 
-The system leverages OCCA’s kernel abstraction to target both SMP and GPU architectures through a restricted but powerful parallel model:
+The system leverages OCCA’s kernel abstraction to target both SMP and GPU architectures through a structured parallel model that maps naturally to modern hardware architectures.
 
-- **@outer loops** map to partitions (thread blocks on GPU, parallel regions on CPU)
-- **@inner loops** map to elements within partitions (threads on GPU, vectorized loops on CPU)
+### OCCA Loop Model and Restrictions
 
-This focused approach trades some generality for significant simplification: element-based algorithms map directly to excellent machine performance without complex transformations.
+OCCA provides a portable parallel programming model with specific constraints that shape how DGKernel structures computations:
+
+**OCCA loop requirements:**
+
+- Every kernel must have exactly one @outer loop level
+- Every kernel must have at least one @inner loop nested within @outer
+- No code or loops allowed between @outer and @inner declarations
+- Loop ranges must be compile-time constants or kernel arguments
+- @outer iterations execute independently (no dependencies between iterations)
+- @inner iterations within an @outer iteration can share data via @shared memory
+- Only @inner loops can be synchronized with barriers
+
+**Hardware mapping:**
+
+- @outer loops → GPU thread blocks or CPU parallel regions
+- @inner loops → GPU threads or CPU vectorized/serial iterations
+
+DGKernel adopts a consistent pattern within these constraints:
+
+- @outer loops iterate over partitions
+- @inner loops iterate over elements within partitions
+
+While users can write kernels with different mappings, DGKernel’s automated patterns and optimizations assume this partition/element structure.
 
 ### The Technical Approach
 
@@ -144,25 +165,36 @@ Modern languages like Go provide a different path. With:
 
 Go allows DGKernel to achieve the same flexibility as earlier C++ systems but with dramatically reduced complexity. The code remains accessible to domain scientists, not just systems programmers.
 
-### The Face Buffer System
+### The Partition Buffer System
 
-The Face Buffer manages communication between elements through their faces:
+The Partition Buffer manages communication between partitions for various types of data:
 
 **Design characteristics:**
 
-- Elements within a partition communicate through face interfaces
-- Face data organized for flux computation
-- Contiguous send/receive buffers for MPI communication
-- Enables efficient distributed computing across multiple nodes
+- Indexes any partition boundary data with element-based addressing
+- User-defined strides for different data types (face points, vertices, etc.)
+- Consolidates all inter-partition communication into efficient message passing
+- Contiguous send/receive buffers optimized for MPI and GPU transfers
 
-**Memory layout:**
+**Flexible data communication:**
 
-- Face values stored in arrays sized by partition element count
-- Send buffers packed with face data for remote partitions
-- Receive buffers hold incoming face data from other partitions
-- Buffer layout optimized for network communication
+- Face data: stride over face points for flux computation
+- Vertex data: stride over vertex values for continuous fields
+- Edge data: stride over edge quadrature points
+- Custom data: any element-based data at partition boundaries
 
-This design supports both local face operations within a partition and remote communication between partitions, providing the foundation for scalable parallel execution.
+**Usage pattern:**
+
+```c
+// Pack various boundary data types
+PackBoundaryData(faceValues, vertexValues, customData, sendBuffer);
+// Single consolidated communication step
+ExchangePartitionBuffers();
+// Unpack for local use
+UnpackBoundaryData(receiveBuffer, remoteFaceData, remoteVertexData);
+```
+
+This design supports complex coupling between partitions while maintaining efficient communication patterns for distributed computing.
 
 ## Practical Considerations
 
@@ -324,24 +356,31 @@ The framework identifies and exploits these patterns automatically.
 
 ## Limitations and Scope
 
-DGKernel’s focused model has clear boundaries:
+DGKernel’s focused model works within OCCA’s constraints:
+
+**Computational model:**
+
+- Partitions perform local computations independently
+- Communication occurs in consolidated steps between partitions
+- Various data types (faces, vertices, edges) can be exchanged
+- The partition buffer system manages all boundary data transfers
 
 **Within Scope:**
 
-- Methods where elements communicate only through faces
-- Algorithms that fit the @outer (partition) / @inner (element) parallel model
-- Local operations within elements
-- Face-based coupling between elements
-- Multigrid methods (injection/prolongation within partitions)
+- Methods where most computation is partition-local
+- Algorithms that fit the @outer/@inner nested loop structure
+- Coupling through partition boundaries (faces, vertices, edges)
+- Multigrid methods (transfers within partition structure)
 - Mixed element meshes (each partition has a fixed element type)
 
 **Outside Scope:**
 
-- Methods requiring arbitrary element-to-element communication beyond faces
-- Algorithms that don’t map to the partition/element parallel structure
-- Global assembly operations that can’t be decomposed
+- Algorithms requiring different parallel decompositions
+- Methods that can’t use OCCA’s loop restrictions
+- Dynamic parallelism or recursive algorithms
+- Kernels needing variable loop bounds within iterations
 
-These constraints enable DGKernel’s key capability: automatic management of operator inputs and outputs based on adherence to operator contracts.
+These constraints enable DGKernel to automate common patterns while working within OCCA’s portable parallel model.
 
 ## Book Organization
 
