@@ -22,21 +22,23 @@ const (
 	Line
 )
 
-type Element struct {
-	Name         func() string
-	ShortName    func() string
-	GeometryType func() ElementGeometry
-	Order        func() int
-	Np           func() int // Number of defining geometric points
-	NFp          func() int // Number of face points
-	NEp          func() int // Number of edge points
-	NVp          func() int // Number of vertex points
-	NIp          func() int // Number of interior points
-	Dimensions   func() Dimensionality
+type Element interface {
+	Name() string
+	ShortName() string
+	GeometryType() ElementGeometry
+	Order() int
+	Np() int  // Number of defining geometric points
+	NFp() int // Number of face points
+	NEp() int // Number of edge points
+	NVp() int // Number of vertex points
+	NIp() int // Number of interior points
+	Dimensions() Dimensionality
+
 	// Reference Geometry Definition
-	R func() []float64
-	S func() []float64
-	T func() []float64
+	R() []float64
+	S() []float64
+	T() []float64
+
 	// JacobianMatrix returns the coordinate transformation Jacobian ∂x/∂ξ
 	// as a [9, Np] matrix where column i contains the 3×3 Jacobian for point i,
 	// stored in row-major order:
@@ -44,16 +46,23 @@ type Element struct {
 	//   jmat.At(3,i) = ∂x/∂η    jmat.At(4,i) = ∂y/∂η    jmat.At(5,i) = ∂z/∂η
 	//   jmat.At(6,i) = ∂x/∂ζ    jmat.At(7,i) = ∂y/∂ζ    jmat.At(8,i) = ∂z/∂ζ
 	// For 2D elements, returns [4, Np] with only the 2×2 components.
-	JacobianMatrix func() mat.Matrix
+	JacobianMatrix() mat.Matrix
+
 	// Point classification by geometric location
-	VertexPoints   func() []int   // Indices into the Np points that are at vertices
-	EdgePoints     func() [][]int // [edge_num][point_indices] - points on each edge
-	FacePoints     func() [][]int // [face_num][point_indices] - points on each face
-	InteriorPoints func() []int   // Points strictly inside the element
+	VertexPoints() []int   // Indices into the Np points that are at vertices
+	EdgePoints() [][]int   // [edge_num][point_indices] - points on each edge
+	FacePoints() [][]int   // [face_num][point_indices] - points on each face
+	InteriorPoints() []int // Points strictly inside the element
+
 	// Nodal / Modal matrices
-	V, Vinv func() mat.Matrix
-	M, Minv func() mat.Matrix
+	V() mat.Matrix
+	Vinv() mat.Matrix
+	M() mat.Matrix
+	Minv() mat.Matrix
+
 	// Basic operators
-	Dr, Ds, Dt func() mat.Matrix
-	LIFT       func() mat.Matrix
+	Dr() mat.Matrix
+	Ds() mat.Matrix
+	Dt() mat.Matrix
+	LIFT() mat.Matrix
 }
