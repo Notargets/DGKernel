@@ -7,18 +7,20 @@ import (
 // TestBuildPartitionFaceBuffers_SinglePartition tests face buffer creation for single partition
 func TestBuildPartitionFaceBuffers_SinglePartition(t *testing.T) {
 	// Create a simple 4-element tetrahedral mesh
+	// Based on EToE: each element has 2 boundary faces (where EToE[elem][face] == elem)
+	// and 2 interior faces (where EToE[elem][face] != elem)
 	mesh := &MeshData{
 		EToE: [][]int{
-			{0, 1, 2, 0}, // Element 0: neighbors on faces 0,1,2; boundary on face 3
-			{1, 0, 3, 1}, // Element 1: neighbors on faces 0,1,2; boundary on face 3
-			{2, 3, 0, 2}, // Element 2: neighbors on faces 0,1,2; boundary on face 3
-			{3, 2, 1, 3}, // Element 3: neighbors on faces 0,1,2; boundary on face 3
+			{0, 1, 2, 0}, // Element 0: boundaries on faces 0,3; interior on faces 1,2
+			{1, 0, 3, 1}, // Element 1: boundaries on faces 0,3; interior on faces 1,2
+			{2, 3, 0, 2}, // Element 2: boundaries on faces 0,3; interior on faces 1,2
+			{3, 2, 1, 3}, // Element 3: boundaries on faces 0,3; interior on faces 1,2
 		},
 		EToF: [][]int{
-			{0, 0, 0, 3}, // Element 0 face connections
-			{0, 0, 0, 3}, // Element 1 face connections
-			{0, 0, 0, 3}, // Element 2 face connections
-			{0, 0, 0, 3}, // Element 3 face connections
+			{0, 1, 2, 3}, // Which face of the neighbor connects back
+			{0, 1, 2, 3},
+			{0, 1, 2, 3},
+			{0, 1, 2, 3},
 		},
 		Nfp:    6, // 6 points per face
 		Nfaces: 4, // 4 faces per tetrahedron
@@ -52,7 +54,7 @@ func TestBuildPartitionFaceBuffers_SinglePartition(t *testing.T) {
 
 	fb := faceBuffers[0]
 
-	// Verify dimensions
+	// Test 1: Verify dimensions (Fundamental property test)
 	if fb.K != 4 {
 		t.Errorf("Expected K=4, got %d", fb.K)
 	}
@@ -63,41 +65,49 @@ func TestBuildPartitionFaceBuffers_SinglePartition(t *testing.T) {
 		t.Errorf("Expected Nfp=6, got %d", fb.Nfp)
 	}
 
-	// Check face index array size
+	// Test 2: Verify face index array size (Arithmetic property)
 	expectedSize := 4 * 4 // K * Nfaces
 	if len(fb.FaceIndex) != expectedSize {
 		t.Errorf("Expected FaceIndex size %d, got %d", expectedSize, len(fb.FaceIndex))
 	}
 
-	// Verify face classifications
+	// Test 3: Count face types based on actual mesh configuration
 	boundaryCount := 0
 	interiorCount := 0
-	for i, code := range fb.FaceIndex {
-		elem := i / 4
-		face := i % 4
-		neighbor := mesh.EToE[elem][face]
 
-		if neighbor == elem {
-			// Should be boundary
-			if code != BoundaryPlaceholder {
-				t.Errorf("Element %d face %d should be boundary, got code %d", elem, face, code)
+	for elem := 0; elem < 4; elem++ {
+		for face := 0; face < 4; face++ {
+			i := face + elem*4
+			code := fb.FaceIndex[i]
+			neighbor := mesh.EToE[elem][face]
+
+			if neighbor == elem {
+				// Should be boundary
+				if code != BoundaryPlaceholder {
+					t.Errorf("Element %d face %d should be boundary, got code %d", elem, face, code)
+				}
+				boundaryCount++
+			} else {
+				// Should be interior (positive value)
+				if code <= 0 {
+					t.Errorf("Element %d face %d should be interior, got code %d", elem, face, code)
+				}
+				interiorCount++
 			}
-			boundaryCount++
-		} else {
-			// Should be interior (positive value)
-			if code <= 0 {
-				t.Errorf("Element %d face %d should be interior, got code %d", elem, face, code)
-			}
-			interiorCount++
 		}
 	}
 
-	// Each element has 3 interior faces and 1 boundary
-	if boundaryCount != 4 {
-		t.Errorf("Expected 4 boundary faces, got %d", boundaryCount)
+	// Test 4: Verify counts match mesh configuration
+	// Based on EToE: each element has faces 0,3 as boundaries (2 per element)
+	// and faces 1,2 as interior (2 per element)
+	expectedBoundary := 8 // 4 elements × 2 boundary faces each
+	expectedInterior := 8 // 4 elements × 2 interior faces each
+
+	if boundaryCount != expectedBoundary {
+		t.Errorf("Expected %d boundary faces, got %d", expectedBoundary, boundaryCount)
 	}
-	if interiorCount != 12 {
-		t.Errorf("Expected 12 interior faces, got %d", interiorCount)
+	if interiorCount != expectedInterior {
+		t.Errorf("Expected %d interior faces, got %d", expectedInterior, interiorCount)
 	}
 }
 
@@ -255,14 +265,14 @@ func TestPopulateFaceIndex(t *testing.T) {
 	// 3-element mesh: 0-1 connected, 2 isolated
 	mesh := &MeshData{
 		EToE: [][]int{
-			{0, 1, 0, 0}, // Element 0
-			{1, 0, 1, 1}, // Element 1
-			{2, 2, 2, 2}, // Element 2 (all boundaries)
+			{0, 1, 0, 0}, // Element 0: connected to element 1 on face 1
+			{1, 0, 1, 1}, // Element 1: connected to element 0 on face 1
+			{2, 2, 2, 2}, // Element 2: all boundaries
 		},
 		EToF: [][]int{
-			{0, 0, 2, 3},
-			{1, 1, 2, 3},
-			{0, 1, 2, 3},
+			{0, 1, 2, 3}, // Element 0: face 1 connects to neighbor's face 1
+			{0, 1, 2, 3}, // Element 1: face 1 connects to neighbor's face 1
+			{0, 1, 2, 3}, // Element 2
 		},
 		Nfp:    4,
 		Nfaces: 4,
@@ -293,8 +303,9 @@ func TestPopulateFaceIndex(t *testing.T) {
 	}
 
 	// Check element 0, face 1 (connects to element 1, face 1)
-	elem0face1 := faceIndex[1]
-	expectedP := int32(1*4*4 + 1*4) // element 1, face 1 start in M buffer
+	elem0face1 := faceIndex[1]                 // face 1 of element 0
+	neighborFace := mesh.EToF[0][1]            // Which face of the neighbor
+	expectedP := int32(1*4*4 + neighborFace*4) // element 1, face neighborFace start in M buffer
 	if elem0face1 != expectedP {
 		t.Errorf("Element 0 face 1: expected P index %d, got %d", expectedP, elem0face1)
 	}
@@ -310,7 +321,7 @@ func TestPopulateFaceIndex(t *testing.T) {
 
 // TestCommunicationSymmetry tests that send/receive patterns match
 func TestCommunicationSymmetry(t *testing.T) {
-	// Create buffers with asymmetric communication (should fail)
+	// Test 1: Incomplete pattern - partition 0 sends to 1, but 1 doesn't declare receiving from 0
 	buffers := []*PartitionBuffer{
 		{
 			RemotePartitions: []RemotePartition{
@@ -318,24 +329,99 @@ func TestCommunicationSymmetry(t *testing.T) {
 			},
 		},
 		{
-			RemotePartitions: []RemotePartition{
-				{PartitionID: 0, SendCount: 5, RecvCount: 10}, // Mismatch!
-			},
+			// Empty - partition 1 doesn't declare any communication
+			RemotePartitions: []RemotePartition{},
 		},
 	}
 
 	err := validateCommunicationSymmetry(buffers)
 	if err == nil {
-		t.Error("Expected validation to fail for asymmetric communication")
+		t.Error("Expected validation to fail when partition 0 sends but partition 1 has no communication")
 	}
 
-	// Fix the asymmetry
-	buffers[1].RemotePartitions[0].SendCount = 10
-	buffers[1].RemotePartitions[0].RecvCount = 5
+	// Test 2: Asymmetric counts - A sends 10 to B, but B sends 5 to A
+	buffers = []*PartitionBuffer{
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 1, SendCount: 10, RecvCount: 5}, // Sends 10, expects to receive 5
+			},
+		},
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 0, SendCount: 5, RecvCount: 10}, // Sends 5, expects to receive 10
+			},
+		},
+	}
+
+	err = validateCommunicationSymmetry(buffers)
+	if err != nil {
+		// This should actually pass! The counts are symmetric
+		t.Errorf("Expected validation to pass for symmetric counts: %v", err)
+	}
+
+	// Test 3: Actually asymmetric - mismatch in what A sends vs what B expects to receive
+	buffers = []*PartitionBuffer{
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 1, SendCount: 10, RecvCount: 5},
+			},
+		},
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 0, SendCount: 5, RecvCount: 8}, // Expects 8 but A only sends 10
+			},
+		},
+	}
+
+	err = validateCommunicationSymmetry(buffers)
+	if err == nil {
+		t.Error("Expected validation to fail for mismatched send/receive counts")
+	}
+
+	// Test 4: Correct symmetric communication
+	buffers = []*PartitionBuffer{
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 1, SendCount: 10, RecvCount: 10},
+			},
+		},
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 0, SendCount: 10, RecvCount: 10},
+			},
+		},
+	}
 
 	err = validateCommunicationSymmetry(buffers)
 	if err != nil {
 		t.Errorf("Expected validation to pass for symmetric communication: %v", err)
+	}
+
+	// Test 5: Multiple partitions with complex pattern
+	buffers = []*PartitionBuffer{
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 1, SendCount: 10, RecvCount: 5},
+				{PartitionID: 2, SendCount: 15, RecvCount: 15},
+			},
+		},
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 0, SendCount: 5, RecvCount: 10},
+				{PartitionID: 2, SendCount: 20, RecvCount: 20},
+			},
+		},
+		{
+			RemotePartitions: []RemotePartition{
+				{PartitionID: 0, SendCount: 15, RecvCount: 15},
+				{PartitionID: 1, SendCount: 20, RecvCount: 20},
+			},
+		},
+	}
+
+	err = validateCommunicationSymmetry(buffers)
+	if err != nil {
+		t.Errorf("Expected validation to pass for complex symmetric pattern: %v", err)
 	}
 }
 

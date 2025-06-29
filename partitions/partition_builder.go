@@ -410,30 +410,85 @@ func getPartitionRank(partitionID int) int {
 }
 
 func validateCommunicationSymmetry(buffers []*PartitionBuffer) error {
-	// Verify that if partition A sends to partition B,
-	// then partition B expects to receive from partition A
+	// Verify symmetric communication: if A sends X to B, then B receives X from A
+	// This validates the complete communication graph
 
-	// Build send expectations
-	sendMap := make(map[string]int) // "sender:receiver" -> count
-	for senderID, buf := range buffers {
-		for _, rp := range buf.RemotePartitions {
-			key := fmt.Sprintf("%d:%d", senderID, rp.PartitionID)
-			sendMap[key] = rp.SendCount
+	// For each partition that declares sending
+	for senderID, senderBuf := range buffers {
+		for _, rp := range senderBuf.RemotePartitions {
+			receiverID := rp.PartitionID
+			sendCount := rp.SendCount
+
+			// Skip if no actual sending
+			if sendCount == 0 {
+				continue
+			}
+
+			// Check if receiver exists
+			if receiverID >= len(buffers) {
+				return fmt.Errorf("partition %d sends to non-existent partition %d",
+					senderID, receiverID)
+			}
+
+			// Find if receiver declares receiving from sender
+			receiverBuf := buffers[receiverID]
+			found := false
+
+			for _, recvRP := range receiverBuf.RemotePartitions {
+				if recvRP.PartitionID == senderID {
+					// Found the back-reference
+					if recvRP.RecvCount != sendCount {
+						return fmt.Errorf("count mismatch: partition %d sends %d to %d, but %d expects to receive %d from %d",
+							senderID, sendCount, receiverID, receiverID, recvRP.RecvCount, senderID)
+					}
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				return fmt.Errorf("partition %d sends to %d, but %d doesn't declare communication with %d",
+					senderID, receiverID, receiverID, senderID)
+			}
 		}
 	}
 
-	// Verify receive expectations match
-	for receiverID, buf := range buffers {
-		for _, rp := range buf.RemotePartitions {
-			key := fmt.Sprintf("%d:%d", rp.PartitionID, receiverID)
-			expectedCount, exists := sendMap[key]
-			if !exists {
-				return fmt.Errorf("partition %d expects to receive from %d, but %d doesn't send",
-					receiverID, rp.PartitionID, rp.PartitionID)
+	// Also check the reverse: if A declares receiving from B, then B must send to A
+	for receiverID, receiverBuf := range buffers {
+		for _, rp := range receiverBuf.RemotePartitions {
+			senderID := rp.PartitionID
+			recvCount := rp.RecvCount
+
+			// Skip if no actual receiving
+			if recvCount == 0 {
+				continue
 			}
-			if expectedCount != rp.RecvCount {
-				return fmt.Errorf("count mismatch: partition %d sends %d to %d, but %d expects %d",
-					rp.PartitionID, expectedCount, receiverID, receiverID, rp.RecvCount)
+
+			// Check if sender exists
+			if senderID >= len(buffers) {
+				return fmt.Errorf("partition %d expects to receive from non-existent partition %d",
+					receiverID, senderID)
+			}
+
+			// Find if sender declares sending to receiver
+			senderBuf := buffers[senderID]
+			found := false
+
+			for _, sendRP := range senderBuf.RemotePartitions {
+				if sendRP.PartitionID == receiverID {
+					// Found the forward-reference
+					if sendRP.SendCount != recvCount {
+						return fmt.Errorf("count mismatch: partition %d expects to receive %d from %d, but %d only sends %d to %d",
+							receiverID, recvCount, senderID, senderID, sendRP.SendCount, receiverID)
+					}
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				return fmt.Errorf("partition %d expects to receive from %d, but %d doesn't declare communication with %d",
+					receiverID, senderID, senderID, receiverID)
 			}
 		}
 	}
