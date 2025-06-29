@@ -1,4 +1,4 @@
-package element
+package integration
 
 import (
 	"github.com/notargets/gocfd/DG3D/mesh/readers"
