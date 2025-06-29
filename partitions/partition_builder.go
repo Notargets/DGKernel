@@ -730,3 +730,63 @@ func applyBCOverlay(faceIndex []int32, bcData map[int]int32, nfaces int) error {
 	}
 	return nil
 }
+
+// PartitionKernelData contains all data needed for OCCA kernel execution
+type PartitionKernelData struct {
+	// Partition sizes for bounds checking
+	K []int32 // Length NumPartitions: K[part] = actual elements in partition
+
+	// Partitioned field data
+	Fields map[string]*PartitionedArray
+
+	// Communication buffers
+	Buffers []*PartitionBuffer
+
+	// Metric data (partitioned)
+	Metrics *PartitionedMetrics
+}
+
+// PartitionedMetrics stores geometric transform data in partition layout
+type PartitionedMetrics struct {
+	// Inverse Jacobian components [Np × K_total]
+	Rx, Ry, Rz *PartitionedArray
+	Sx, Sy, Sz *PartitionedArray
+	Tx, Ty, Tz *PartitionedArray
+
+	// Jacobian determinant [Np × K_total]
+	J *PartitionedArray
+
+	// Surface metrics [NFaces*NFp × K_total]
+	Nx, Ny, Nz *PartitionedArray
+	SJ         *PartitionedArray
+}
+
+// PrepareKernelArgs prepares kernel arguments from partitioned data
+func PrepareKernelArgs(layout *PartitionLayout, data *PartitionKernelData) []interface{} {
+	args := []interface{}{
+		data.K, // Always first: partition sizes
+	}
+
+	// Add field arrays with offsets
+	for _, field := range data.Fields {
+		args = append(args, field.GlobalData, field.Offsets)
+	}
+
+	// Add metric arrays with offsets if present
+	if data.Metrics != nil {
+		if data.Metrics.Rx != nil {
+			args = append(args, data.Metrics.Rx.GlobalData, data.Metrics.Rx.Offsets)
+		}
+		if data.Metrics.Ry != nil {
+			args = append(args, data.Metrics.Ry.GlobalData, data.Metrics.Ry.Offsets)
+		}
+		if data.Metrics.Rz != nil {
+			args = append(args, data.Metrics.Rz.GlobalData, data.Metrics.Rz.Offsets)
+		}
+		if data.Metrics.J != nil {
+			args = append(args, data.Metrics.J.GlobalData, data.Metrics.J.Offsets)
+		}
+	}
+
+	return args
+}
