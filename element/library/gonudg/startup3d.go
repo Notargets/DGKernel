@@ -2,8 +2,9 @@ package gonudg
 
 import (
 	"fmt"
-	"gonum.org/v1/gonum/mat"
 	"math"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 // DG3D represents a 3D discontinuous Galerkin solver
@@ -102,13 +103,17 @@ func (dg *DG3D) StartUp3D() error {
 
 	// Build reference element matrices
 	dg.V = Vandermonde3D(dg.N, dg.R, dg.S, dg.T)
-	// dg.Vinv = dg.V.InverseWithCheck()
-	// dg.MassMatrix = dg.Vinv.T().Mul(dg.Vinv)
 
-	// dg.MassMatrix = dg.Vinv.T().Mul(dg.Vinv)
-	var MM mat.Dense
-	MM.Mul(dg.Vinv.T(), dg.Vinv)
-	dg.MassMatrix = &MM
+	// Compute V inverse
+	dg.Vinv = mat.NewDense(dg.Np, dg.Np, nil)
+	err := dg.Vinv.Inverse(dg.V)
+	if err != nil {
+		return fmt.Errorf("failed to invert Vandermonde matrix: %v", err)
+	}
+
+	// Compute mass matrix: M = (V^T * V)^{-1} = V^{-T} * V^{-1}
+	dg.MassMatrix = mat.NewDense(dg.Np, dg.Np, nil)
+	dg.MassMatrix.Mul(dg.Vinv.T(), dg.Vinv)
 
 	// Build differentiation matrices
 	dg.Dr, dg.Ds, dg.Dt = Dmatrices3D(dg.N, dg.R, dg.S, dg.T, dg.V)
