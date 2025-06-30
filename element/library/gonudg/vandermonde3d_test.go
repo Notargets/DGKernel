@@ -2,9 +2,10 @@ package gonudg
 
 import (
 	"fmt"
-	"github.com/notargets/gocfd/utils"
 	"math"
 	"testing"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 func TestVandermonde3D(t *testing.T) {
@@ -41,10 +42,17 @@ func TestVandermonde3D(t *testing.T) {
 
 			// Check that V is invertible
 			if tc.N <= 3 {
-				Vinv := V.InverseWithCheck()
+				// Use proper gonum inverse
+				var Vinv mat.Dense
+				err := Vinv.Inverse(V)
+				if err != nil {
+					t.Errorf("Failed to invert Vandermonde matrix: %v", err)
+					return
+				}
 
 				// Check V * V^{-1} = I
-				I := V.Mul(Vinv)
+				var I mat.Dense
+				I.Mul(V, &Vinv)
 				for i := 0; i < Np; i++ {
 					for j := 0; j < Np; j++ {
 						expected := 0.0
@@ -71,10 +79,10 @@ func TestGradVandermonde3D(t *testing.T) {
 
 	Vr, Vs, Vt := GradVandermonde3D(N, r, s, tt)
 
-	// Check dimensions
+	// Check dimensions using gonum mat.Matrix interface
 	matrices := []struct {
 		name string
-		mat  utils.Matrix
+		mat  mat.Matrix
 	}{
 		{"Vr", Vr},
 		{"Vs", Vs},
@@ -118,27 +126,34 @@ func TestDmatrices3D(t *testing.T) {
 	// We should get df/dr = a exactly
 
 	a, b, c, d := 2.0, -3.0, 1.5, 0.5
-	f := utils.NewVector(len(r))
+	f := make([]float64, len(r))
 	for i := 0; i < len(r); i++ {
-		f.Set(i, a*r[i]+b*s[i]+c*tt[i]+d)
+		f[i] = a*r[i] + b*s[i] + c*tt[i] + d
 	}
 
 	// Compute derivatives using matrix multiplication
-	dfdr := Dr.Mul(f.ToMatrix())
-	dfds := Ds.Mul(f.ToMatrix())
-	dfdt := Dt.Mul(f.ToMatrix())
+	// Convert to gonum vector for multiplication
+	fVec := mat.NewVecDense(len(f), f)
+
+	dfdrVec := mat.NewVecDense(len(f), nil)
+	dfdsVec := mat.NewVecDense(len(f), nil)
+	dfdtVec := mat.NewVecDense(len(f), nil)
+
+	dfdrVec.MulVec(Dr, fVec)
+	dfdsVec.MulVec(Ds, fVec)
+	dfdtVec.MulVec(Dt, fVec)
 
 	// Check results
 	tol := 1e-10
 	for i := 0; i < len(r); i++ {
-		if math.Abs(dfdr.At(i, 0)-a) > tol {
-			t.Errorf("df/dr incorrect at node %d: got %v, want %v", i, dfdr.At(i, 0), a)
+		if math.Abs(dfdrVec.AtVec(i)-a) > tol {
+			t.Errorf("df/dr incorrect at node %d: got %v, want %v", i, dfdrVec.AtVec(i), a)
 		}
-		if math.Abs(dfds.At(i, 0)-b) > tol {
-			t.Errorf("df/ds incorrect at node %d: got %v, want %v", i, dfds.At(i, 0), b)
+		if math.Abs(dfdsVec.AtVec(i)-b) > tol {
+			t.Errorf("df/ds incorrect at node %d: got %v, want %v", i, dfdsVec.AtVec(i), b)
 		}
-		if math.Abs(dfdt.At(i, 0)-c) > tol {
-			t.Errorf("df/dt incorrect at node %d: got %v, want %v", i, dfdt.At(i, 0), c)
+		if math.Abs(dfdtVec.AtVec(i)-c) > tol {
+			t.Errorf("df/dt incorrect at node %d: got %v, want %v", i, dfdtVec.AtVec(i), c)
 		}
 	}
 }

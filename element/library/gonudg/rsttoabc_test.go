@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"testing"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 func TestRSTtoABC(t *testing.T) {
@@ -357,15 +359,25 @@ func TestVandermonde3DWithAllFixes(t *testing.T) {
 				}
 			}()
 
-			Vinv := V.InverseWithCheck()
+			// Fix: Use proper gonum API
+			var Vinv mat.Dense
+			err := Vinv.Inverse(V)
+			if err != nil {
+				fmt.Printf("  Matrix inversion failed: %v\n", err)
+				t.Errorf("N=%d: Vandermonde matrix is singular", N)
+				continue
+			}
 			fmt.Printf("  Matrix inverted successfully!\n")
 
-			// Verify it'S a good inverse
-			I := V.Mul(Vinv)
-			sumCols := I.SumCols()
-			var sum float64
-			for i := 0; i < sumCols.Len(); i++ {
-				sum += sumCols.AtVec(i)
+			// Verify it's a good inverse
+			var I mat.Dense
+			I.Mul(V, &Vinv)
+
+			// Check if I is close to identity
+			nr, _ := I.Dims()
+			sum := 0.0
+			for i := 0; i < nr; i++ {
+				sum += I.At(i, i)
 			}
 			fmt.Printf("  Sum check: %.6f (expected %d)\n", sum, nr)
 		} else {

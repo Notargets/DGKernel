@@ -2,9 +2,10 @@ package gonudg
 
 import (
 	"fmt"
-	"github.com/notargets/gocfd/utils"
 	"math"
 	"testing"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 func TestStartUp3D(t *testing.T) {
@@ -35,9 +36,9 @@ func TestStartUp3D(t *testing.T) {
 				t.Errorf("Wrong Nfp: got %d, want %d", dg.Nfp, expectedNfp)
 			}
 
-			// Check matrix dimensions
-			checkMatrixDims := func(name string, mat utils.Matrix, expectedRows, expectedCols int) {
-				nr, nc := mat.Dims()
+			// Check matrix dimensions using gonum mat.Matrix interface
+			checkMatrixDims := func(name string, m mat.Matrix, expectedRows, expectedCols int) {
+				nr, nc := m.Dims()
 				if nr != expectedRows || nc != expectedCols {
 					t.Errorf("%s dimensions wrong: got (%d,%d), want (%d,%d)",
 						name, nr, nc, expectedRows, expectedCols)
@@ -55,7 +56,8 @@ func TestStartUp3D(t *testing.T) {
 			checkMatrixDims("Z", dg.Z, dg.Np, dg.K)
 
 			// Check V*Vinv = I
-			I := dg.V.Mul(dg.Vinv)
+			var I mat.Dense
+			I.Mul(dg.V, dg.Vinv)
 			nr, nc := I.Dims()
 			for i := 0; i < nr; i++ {
 				for j := 0; j < nc; j++ {
