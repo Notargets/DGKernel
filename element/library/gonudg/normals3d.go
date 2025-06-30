@@ -4,28 +4,31 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/notargets/gocfd/utils"
+	"gonum.org/v1/gonum/mat"
 )
 
 // GeometricFactors3D computes the metric elements for the local mappings of the elements
 func (dg *DG3D) GeometricFactors3D() error {
 	// Calculate geometric factors
 	// xr = Dr*X, xs = Ds*X, xt = Dt*X
-	xr := dg.Dr.Mul(dg.X)
-	xs := dg.Ds.Mul(dg.X)
-	xt := dg.Dt.Mul(dg.X)
+	var xr, xs, xt mat.Dense
+	xr.Mul(dg.Dr, dg.X)
+	xs.Mul(dg.Ds, dg.X)
+	xt.Mul(dg.Dt, dg.X)
 
-	yr := dg.Dr.Mul(dg.Y)
-	ys := dg.Ds.Mul(dg.Y)
-	yt := dg.Dt.Mul(dg.Y)
+	var yr, ys, yt mat.Dense
+	yr.Mul(dg.Dr, dg.Y)
+	ys.Mul(dg.Ds, dg.Y)
+	yt.Mul(dg.Dt, dg.Y)
 
-	zr := dg.Dr.Mul(dg.Z)
-	zs := dg.Ds.Mul(dg.Z)
-	zt := dg.Dt.Mul(dg.Z)
+	var zr, zs, zt mat.Dense
+	zr.Mul(dg.Dr, dg.Z)
+	zs.Mul(dg.Ds, dg.Z)
+	zt.Mul(dg.Dt, dg.Z)
 
 	// Compute Jacobian determinant
 	// J = xr*(ys*zt - zs*yt) - yr*(xs*zt - zs*xt) + zr*(xs*yt - ys*xt)
-	dg.J = utils.NewMatrix(dg.Np, dg.K)
+	dg.J = mat.NewDense(dg.Np, dg.K, nil)
 	for i := 0; i < dg.Np; i++ {
 		for k := 0; k < dg.K; k++ {
 			J := xr.At(i, k)*(ys.At(i, k)*zt.At(i, k)-zs.At(i, k)*yt.At(i, k)) -
@@ -40,15 +43,15 @@ func (dg *DG3D) GeometricFactors3D() error {
 	}
 
 	// Initialize metric term matrices
-	dg.Rx = utils.NewMatrix(dg.Np, dg.K)
-	dg.Ry = utils.NewMatrix(dg.Np, dg.K)
-	dg.Rz = utils.NewMatrix(dg.Np, dg.K)
-	dg.Sx = utils.NewMatrix(dg.Np, dg.K)
-	dg.Sy = utils.NewMatrix(dg.Np, dg.K)
-	dg.Sz = utils.NewMatrix(dg.Np, dg.K)
-	dg.Tx = utils.NewMatrix(dg.Np, dg.K)
-	dg.Ty = utils.NewMatrix(dg.Np, dg.K)
-	dg.Tz = utils.NewMatrix(dg.Np, dg.K)
+	dg.Rx = mat.NewDense(dg.Np, dg.K, nil)
+	dg.Ry = mat.NewDense(dg.Np, dg.K, nil)
+	dg.Rz = mat.NewDense(dg.Np, dg.K, nil)
+	dg.Sx = mat.NewDense(dg.Np, dg.K, nil)
+	dg.Sy = mat.NewDense(dg.Np, dg.K, nil)
+	dg.Sz = mat.NewDense(dg.Np, dg.K, nil)
+	dg.Tx = mat.NewDense(dg.Np, dg.K, nil)
+	dg.Ty = mat.NewDense(dg.Np, dg.K, nil)
+	dg.Tz = mat.NewDense(dg.Np, dg.K, nil)
 
 	// Compute inverse metric terms
 	for i := 0; i < dg.Np; i++ {
@@ -87,13 +90,13 @@ func (dg *DG3D) Normals3D() error {
 	Nfaces := dg.Nfaces
 	K := dg.K
 
-	dg.Nx = utils.NewMatrix(Nfp*Nfaces, K)
-	dg.Ny = utils.NewMatrix(Nfp*Nfaces, K)
-	dg.Nz = utils.NewMatrix(Nfp*Nfaces, K)
-	dg.SJ = utils.NewMatrix(Nfp*Nfaces, K)
+	dg.Nx = mat.NewDense(Nfp*Nfaces, K, nil)
+	dg.Ny = mat.NewDense(Nfp*Nfaces, K, nil)
+	dg.Nz = mat.NewDense(Nfp*Nfaces, K, nil)
+	dg.SJ = mat.NewDense(Nfp*Nfaces, K, nil)
 
 	// Build normals for each face
-	// Face 1: T = -1, normal = -[Tx, Ty, Tz]
+	// Face 1: t = -1, normal = -[Tx, Ty, Tz]
 	for k := 0; k < K; k++ {
 		for i := 0; i < Nfp; i++ {
 			vid := dg.Fmask[0][i] // volume node index
@@ -105,7 +108,7 @@ func (dg *DG3D) Normals3D() error {
 		}
 	}
 
-	// Face 2: S = -1, normal = -[Sx, Sy, Sz]
+	// Face 2: s = -1, normal = -[Sx, Sy, Sz]
 	for k := 0; k < K; k++ {
 		for i := 0; i < Nfp; i++ {
 			vid := dg.Fmask[1][i]
@@ -117,7 +120,7 @@ func (dg *DG3D) Normals3D() error {
 		}
 	}
 
-	// Face 3: R+S+T = -1, normal = [Rx+Sx+Tx, Ry+Sy+Ty, Rz+Sz+Tz]
+	// Face 3: r+s+t = -1, normal = [Rx+Sx+Tx, Ry+Sy+Ty, Rz+Sz+Tz]
 	for k := 0; k < K; k++ {
 		for i := 0; i < Nfp; i++ {
 			vid := dg.Fmask[2][i]
@@ -129,7 +132,7 @@ func (dg *DG3D) Normals3D() error {
 		}
 	}
 
-	// Face 4: R = -1, normal = -[Rx, Ry, Rz]
+	// Face 4: r = -1, normal = -[Rx, Ry, Rz]
 	for k := 0; k < K; k++ {
 		for i := 0; i < Nfp; i++ {
 			vid := dg.Fmask[3][i]
@@ -179,4 +182,26 @@ func (dg *DG3D) Normals3D() error {
 	}
 
 	return nil
+}
+
+// ComputeFscale computes the ratio of face Jacobians for flux computations
+func (dg *DG3D) ComputeFscale() {
+	// Compute Fscale = SJ ./ J(Fmask,:)
+	Nfp := dg.Nfp
+	Nfaces := dg.Nfaces
+	K := dg.K
+
+	dg.Fscale = mat.NewDense(Nfp*Nfaces, K, nil)
+
+	for face := 0; face < Nfaces; face++ {
+		for i := 0; i < Nfp; i++ {
+			vid := dg.Fmask[face][i] // volume node index
+			row := face*Nfp + i      // face node index
+
+			for k := 0; k < K; k++ {
+				// Fscale = SJ / J at face nodes
+				dg.Fscale.Set(row, k, dg.SJ.At(row, k)/dg.J.At(vid, k))
+			}
+		}
+	}
 }

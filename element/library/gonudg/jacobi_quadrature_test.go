@@ -175,7 +175,7 @@ func TestJacobiGQ(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			x := JacobiGQ(tc.alpha, tc.beta, tc.N)
+			x, _ := JacobiGQ(tc.alpha, tc.beta, tc.N)
 
 			// Check correct number of points
 			expectedLen := tc.N + 1

@@ -2,10 +2,10 @@ package gonudg
 
 import (
 	"fmt"
+	"github.com/notargets/DGKernel/mesh"
 	"math"
 	"testing"
 
-	"github.com/notargets/gocfd/DG3D/mesh"
 	"github.com/notargets/gocfd/utils"
 )
 

@@ -4,133 +4,103 @@ import (
 	"math"
 )
 
-// JacobiPNormalized evaluates normalized Jacobi polynomial of type (alpha,beta) > -1
-// at points X for order N. This is a direct port of JacobiP.cpp.
-// Note: They are normalized to be orthonormal.
-func JacobiPNormalized(x []float64, alpha, beta float64, N int) []float64 {
-	Nc := len(x)
-	P := make([]float64, Nc)
+// JacobiP evaluates Jacobi polynomial of type (alpha,beta) at points x for order n
+// This version works with []float64
+func JacobiP(x []float64, alpha, beta float64, n int) []float64 {
+	Np := len(x)
+	P := make([]float64, Np)
 
-	ab := alpha + beta
-	ab1 := alpha + beta + 1.0
-	a1 := alpha + 1.0
-	b1 := beta + 1.0
+	// Initial values P_0(x) and P_1(x)
+	gamma0 := math.Pow(2, alpha+beta+1) / (alpha + beta + 1) *
+		math.Gamma(alpha+1) * math.Gamma(beta+1) / math.Gamma(alpha+beta+1)
 
-	// Initial values P_0(X) and P_1(X)
-	gamma0 := math.Pow(2.0, ab1) / ab1 * gamma(a1) * gamma(b1) / gamma(ab1)
+	for i := range P {
+		P[i] = 1.0 / math.Sqrt(gamma0)
+	}
 
-	if N == 0 {
-		sqrtGamma0 := 1.0 / math.Sqrt(gamma0)
-		for i := 0; i < Nc; i++ {
-			P[i] = sqrtGamma0
-		}
+	if n == 0 {
 		return P
 	}
 
-	// Store polynomials P_0 through P_N
-	// PL[i][j] = P_i(x_j)
-	PL := make([][]float64, N+1)
-	for i := 0; i <= N; i++ {
-		PL[i] = make([]float64, Nc)
+	gamma1 := (alpha + 1) * (beta + 1) / (alpha + beta + 3) * gamma0
+	for i := range P {
+		P[i] = ((alpha+beta+2)*x[i] + (alpha - beta)) / 2 / math.Sqrt(gamma1)
 	}
 
-	// P_0
-	sqrtGamma0 := 1.0 / math.Sqrt(gamma0)
-	for j := 0; j < Nc; j++ {
-		PL[0][j] = sqrtGamma0
+	if n == 1 {
+		return P
 	}
 
-	if N >= 1 {
-		// P_1
-		gamma1 := a1 * b1 / (ab + 3.0) * gamma0
-		sqrtGamma1 := 1.0 / math.Sqrt(gamma1)
-		for j := 0; j < Nc; j++ {
-			PL[1][j] = ((ab+2.0)*x[j]/2.0 + (alpha-beta)/2.0) * sqrtGamma1
-		}
+	// Use recurrence relation for higher orders
+	aold := 2.0 / (2.0 + alpha + beta) * math.Sqrt((alpha+1)*(beta+1)/(alpha+beta+3))
 
-		if N == 1 {
-			copy(P, PL[1])
-			return P
-		}
-	}
+	for i := 1; i < n; i++ {
+		h1 := 2*float64(i) + alpha + beta
+		anew := 2.0 / (h1 + 2) * math.Sqrt((float64(i)+1)*(float64(i)+1+alpha+beta)*
+			(float64(i)+1+alpha)*(float64(i)+1+beta)/(h1+1)/(h1+3))
+		bnew := -(alpha*alpha - beta*beta) / h1 / (h1 + 2)
 
-	// Repeat value in recurrence
-	aold := 2.0 / (2.0 + ab) * math.Sqrt(a1*b1/(ab+3.0))
+		// Update P values using recurrence
+		Pold := make([]float64, Np)
+		copy(Pold, P)
 
-	// Forward recurrence using the symmetry of the recurrence
-	for i := 1; i <= N-1; i++ {
-		h1 := 2.0*float64(i) + ab
-		fi := float64(i)
-		anew := 2.0 / (h1 + 2.0) * math.Sqrt((fi+1.0)*(fi+ab1)*(fi+a1)*(fi+b1)/(h1+1.0)/(h1+3.0))
-		bnew := -(alpha*alpha - beta*beta) / h1 / (h1 + 2.0)
-
-		// PL[i+1] = 1/anew * (-aold*PL[i-1] + (X-bnew)*PL[i])
-		for j := 0; j < Nc; j++ {
-			PL[i+1][j] = 1.0 / anew * (-aold*PL[i-1][j] + (x[j]-bnew)*PL[i][j])
+		for j := range P {
+			P[j] = 1 / anew * (-aold*P[j] + (x[j]-bnew)*P[j])
 		}
 
 		aold = anew
 	}
 
-	copy(P, PL[N])
 	return P
 }
 
-// JacobiPNormalizedSingle evaluates normalized Jacobi polynomial at a single point
-func JacobiPNormalizedSingle(x, alpha, beta float64, N int) float64 {
-	xArr := []float64{x}
-	result := JacobiPNormalized(xArr, alpha, beta, N)
-	return result[0]
-}
-
-// GradJacobiPNormalized evaluates the derivative of normalized Jacobi polynomial
-func GradJacobiPNormalized(x []float64, alpha, beta float64, N int) []float64 {
-	if N == 0 {
-		return make([]float64, len(x))
-	}
-
-	// dP_n/dx = sqrt(n(n+alpha+beta+1)) * P_{n-1}^{(alpha+1,beta+1)}(X)
-	p := JacobiPNormalized(x, alpha+1, beta+1, N-1)
-	fN := float64(N)
-	fac := math.Sqrt(fN * (fN + alpha + beta + 1))
-
-	for i := range p {
-		p[i] *= fac
-	}
-	return p
-}
-
-// GradJacobiPNormalizedSingle evaluates the derivative at a single point
-func GradJacobiPNormalizedSingle(x, alpha, beta float64, N int) float64 {
-	xArr := []float64{x}
-	result := GradJacobiPNormalized(xArr, alpha, beta, N)
-	return result[0]
-}
-
-// gamma wraps math.Gamma for clarity
-func gamma(x float64) float64 {
-	return math.Gamma(x)
-}
-
-// The following are compatibility wrappers that redirect to the normalized versions
-// These replace the previous DG1D wrappers
-
-// JacobiP evaluates Jacobi polynomial - redirects to normalized version
-func JacobiP(x []float64, alpha, beta float64, N int) []float64 {
-	return JacobiPNormalized(x, alpha, beta, N)
-}
-
 // JacobiPSingle evaluates Jacobi polynomial at a single point
-func JacobiPSingle(x, alpha, beta float64, N int) float64 {
-	return JacobiPNormalizedSingle(x, alpha, beta, N)
+func JacobiPSingle(x, alpha, beta float64, n int) float64 {
+	xArr := []float64{x}
+	result := JacobiP(xArr, alpha, beta, n)
+	return result[0]
 }
 
-// GradJacobiP evaluates the derivative of Jacobi polynomial
-func GradJacobiP(x []float64, alpha, beta float64, N int) []float64 {
-	return GradJacobiPNormalized(x, alpha, beta, N)
+// GradJacobiP evaluates the derivative of the Jacobi polynomial of type (alpha,beta) at points x for order n
+func GradJacobiP(x []float64, alpha, beta float64, n int) []float64 {
+	Np := len(x)
+	dP := make([]float64, Np)
+
+	if n == 0 {
+		// Derivative of constant is zero
+		return dP
+	}
+
+	// Use the derivative formula: d/dx P_n^(a,b)(x) = sqrt(n(n+a+b+1)) * P_{n-1}^(a+1,b+1)(x)
+	Ptemp := JacobiP(x, alpha+1, beta+1, n-1)
+	for i := range dP {
+		dP[i] = math.Sqrt(float64(n)*(float64(n)+alpha+beta+1)) * Ptemp[i]
+	}
+
+	return dP
 }
 
-// GradJacobiPSingle evaluates the derivative at a single point
-func GradJacobiPSingle(x, alpha, beta float64, N int) float64 {
-	return GradJacobiPNormalizedSingle(x, alpha, beta, N)
+// Gamma computes the gamma function
+// For simplicity, we'll use a basic implementation
+func Gamma(x float64) float64 {
+	// This is a simplified version. In production, use math.Gamma when available
+	// or a more sophisticated implementation
+	if x == 1.0 {
+		return 1.0
+	}
+	if x == 0.5 {
+		return math.Sqrt(math.Pi)
+	}
+	// For integer values
+	if x == math.Floor(x) && x > 0 {
+		n := int(x)
+		result := 1.0
+		for i := 1; i < n; i++ {
+			result *= float64(i)
+		}
+		return result
+	}
+	// For other values, use Stirling's approximation or other methods
+	// This is simplified - in production use a proper gamma function
+	return math.Sqrt(2*math.Pi/x) * math.Pow(x/math.E, x)
 }
