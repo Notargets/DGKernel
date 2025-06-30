@@ -2,6 +2,7 @@ package gonudg
 
 import (
 	"fmt"
+	"gonum.org/v1/gonum/mat"
 	"math"
 	"testing"
 )
@@ -145,15 +146,27 @@ func TestNormals3DMetricIdentities(t *testing.T) {
 	// The metric tensor satisfies: [Rx Ry Rz; Sx Sy Sz; Tx Ty Tz] * [xr xs xt; yr ys yt; zr zs zt] = I
 
 	// Compute derivatives of physical coordinates
-	xr := dg.Dr.Mul(dg.X)
-	xs := dg.Ds.Mul(dg.X)
-	xt := dg.Dt.Mul(dg.X)
-	yr := dg.Dr.Mul(dg.Y)
-	ys := dg.Ds.Mul(dg.Y)
-	yt := dg.Dt.Mul(dg.Y)
-	zr := dg.Dr.Mul(dg.Z)
-	zs := dg.Ds.Mul(dg.Z)
-	zt := dg.Dt.Mul(dg.Z)
+	var xr, xs, xt mat.Dense
+	var yr, ys, yt mat.Dense
+	var zr, zs, zt mat.Dense
+	xr.Mul(dg.Dr, dg.X)
+	xs.Mul(dg.Ds, dg.X)
+	xt.Mul(dg.Dt, dg.X)
+	yr.Mul(dg.Dr, dg.Y)
+	ys.Mul(dg.Ds, dg.Y)
+	yt.Mul(dg.Dt, dg.Y)
+	zr.Mul(dg.Dr, dg.Z)
+	zs.Mul(dg.Ds, dg.Z)
+	zt.Mul(dg.Dt, dg.Z)
+	// xr := dg.Dr.Mul(dg.X)
+	// xs := dg.Ds.Mul(dg.X)
+	// xt := dg.Dt.Mul(dg.X)
+	// yr := dg.Dr.Mul(dg.Y)
+	// ys := dg.Ds.Mul(dg.Y)
+	// yt := dg.Dt.Mul(dg.Y)
+	// zr := dg.Dr.Mul(dg.Z)
+	// zs := dg.Ds.Mul(dg.Z)
+	// zt := dg.Dt.Mul(dg.Z)
 
 	// Check identities at each node
 	for i := 0; i < dg.Np; i++ {

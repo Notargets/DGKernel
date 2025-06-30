@@ -2,7 +2,7 @@ package gonudg
 
 import (
 	"fmt"
-	"github.com/notargets/gocfd/utils"
+	"gonum.org/v1/gonum/mat"
 	"math"
 	"testing"
 )
@@ -227,13 +227,17 @@ func TestLift3DConstantFunction(t *testing.T) {
 	// Create a vector representing constant value 1.0 on all face nodes
 	Nfp := (N + 1) * (N + 2) / 2
 	Nfaces := 4
-	faceVals := utils.NewVector(Nfaces * Nfp)
-	for i := 0; i < faceVals.Len(); i++ {
-		faceVals.Set(i, 1.0)
+	faceVals := make([]float64, Nfaces*Nfp)
+	for i := 0; i < len(faceVals); i++ {
+		faceVals[i] = 1.0
 	}
 
 	// Apply LIFT
-	volumeVals := dg.LIFT.Mul(faceVals.ToMatrix())
+	var vV mat.Dense
+	// volumeVals := dg.LIFT.Mul(faceVals.ToMatrix())
+	fV := mat.NewDense(len(faceVals), 1, faceVals)
+	vV.Mul(dg.LIFT, fV)
+	volumeVals := &vV
 
 	// The result should lift the face values into the volume
 	// For a well-formed LIFT operator, the values should be non-zero
@@ -271,13 +275,17 @@ func TestLift3DFaceConsistency(t *testing.T) {
 
 	for face := 0; face < Nfaces; face++ {
 		// Create face values: 1.0 on current face, 0.0 elsewhere
-		faceVals := utils.NewVector(Nfaces * Nfp)
-		for i := 0; i < Nfp; i++ {
-			faceVals.Set(face*Nfp+i, 1.0)
+		faceVals := make([]float64, Nfaces*Nfp)
+		for i := 0; i < len(faceVals); i++ {
+			faceVals[i] = 1.0
 		}
 
 		// Apply LIFT
-		volumeVals := dg.LIFT.Mul(faceVals.ToMatrix())
+		var vV mat.Dense
+		// volumeVals := dg.LIFT.Mul(faceVals.ToMatrix())
+		fV := mat.NewDense(len(faceVals), 1, faceVals)
+		vV.Mul(dg.LIFT, fV)
+		volumeVals := &vV
 
 		// Check that values at face nodes are significant
 		for _, nodeIdx := range dg.Fmask[face] {
@@ -305,7 +313,9 @@ func TestLift3DOrthogonality(t *testing.T) {
 	// The LIFT operator should satisfy certain orthogonality properties
 	// with respect to the mass matrix
 	// Specifically: M * LIFT should have structure related to face quadrature
-	ML := dg.MassMatrix.Mul(dg.LIFT)
+	var MLr mat.Dense
+	MLr.Mul(dg.MassMatrix, dg.LIFT)
+	ML := &MLr
 
 	// Check that M*LIFT has reasonable values
 	nrows, ncols := ML.Dims()
