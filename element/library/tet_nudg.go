@@ -1,4 +1,4 @@
-package integration
+package library
 
 import (
 	"github.com/notargets/DGKernel/element"
