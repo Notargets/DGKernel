@@ -2,7 +2,7 @@ package readers
 
 import (
 	"fmt"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"os"
 	"path/filepath"
 	"sort"
@@ -142,7 +142,7 @@ func TestReadSU2StandardMeshes(t *testing.T) {
 
 		// Get expected element counts from test mesh
 		tm := utils.GetStandardTestMeshes()
-		var expectedTypes []utils.ElementType
+		var expectedTypes []utils.GeometryType
 		for _, elemSet := range tm.MixedMesh.Elements {
 			for range elemSet.Elements {
 				expectedTypes = append(expectedTypes, elemSet.Type)
@@ -192,7 +192,7 @@ func TestReadSU2ElementTypes(t *testing.T) {
 	testCases := []struct {
 		name         string
 		su2Type      int
-		expectedType utils.ElementType
+		expectedType utils.GeometryType
 		numNodes     int
 		dimension    int
 	}{
@@ -661,7 +661,7 @@ func (b *SU2TestBuilder) add3DBoundaryMarkers(mesh *utils.CompleteMesh) []string
 }
 
 // elementTypeToSU2 converts internal element types to SU2/VTK type codes
-func elementTypeToSU2(et utils.ElementType) int {
+func elementTypeToSU2(et utils.GeometryType) int {
 	switch et {
 	case utils.Line:
 		return 3

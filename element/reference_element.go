@@ -1,6 +1,9 @@
 package element
 
-import "gonum.org/v1/gonum/mat"
+import (
+	"github.com/notargets/DGKernel/utils"
+	"gonum.org/v1/gonum/mat"
+)
 
 // Dimensionality represents the spatial dimension of an element
 type Dimensionality uint8
@@ -11,36 +14,18 @@ const (
 	D3                       // 3D elements (tetrahedra, hexahedra, etc.)
 )
 
-// GeometryType identifies the shape of an element
-type GeometryType uint8
-
-const (
-	// 3D element types
-	Tet     GeometryType = iota // Tetrahedron
-	Hex                         // Hexahedron
-	Prism                       // Triangular prism
-	Pyramid                     // Square-based pyramid
-
-	// 2D element types
-	Tri       // Triangle
-	Rectangle // Rectangle/Quadrilateral
-
-	// 1D element type
-	Line // Line segment
-)
-
 // ElementProperties contains metadata describing an element type
 type ElementProperties struct {
-	Name       string         // Full descriptive name (e.g., "Lagrange Tetrahedron Order 3")
-	ShortName  string         // Abbreviated name (e.g., "Tet3")
-	Type       GeometryType   // Element shape
-	Order      int            // Polynomial order
-	Np         int            // Total number of nodes/points in element
-	NFp        int            // Number of nodes per face
-	NEp        int            // Number of nodes per edge
-	NVp        int            // Number of vertex nodes (equals number of vertices)
-	NIp        int            // Number of strictly interior nodes
-	Dimensions Dimensionality // Spatial dimension (1D, 2D, or 3D)
+	Name       string             // Full descriptive name (e.g., "Lagrange Tetrahedron Order 3")
+	ShortName  string             // Abbreviated name (e.g., "Tet3")
+	Type       utils.GeometryType // Element shape
+	Order      int                // Polynomial order
+	Np         int                // Total number of nodes/points in element
+	NFp        int                // Number of nodes per face
+	NEp        int                // Number of nodes per edge
+	NVp        int                // Number of vertex nodes (equals number of vertices)
+	NIp        int                // Number of strictly interior nodes
+	Dimensions Dimensionality     // Spatial dimension (1D, 2D, or 3D)
 }
 
 // ReferenceGeometry defines the layout of nodes in reference space [-1,1]^d

@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 )
 
 // Helper function to convert CompleteMesh to DG3D format

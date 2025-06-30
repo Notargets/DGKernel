@@ -2,7 +2,7 @@ package mesh
 
 import (
 	"fmt"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,10 +34,11 @@ type NodeGroup struct {
 
 // BoundaryElement represents a boundary element/face
 type BoundaryElement struct {
-	ElementType   utils.ElementType // Type of boundary element (Line, Triangle, Quad)
-	Nodes         []int             // Node indices forming the boundary element
-	ParentElement int               // Parent volume element (-1 if none)
-	ParentFace    int               // Local face ID within parent element (-1 if none)
+	ElementType utils.GeometryType
+	// Triangle, Quad)
+	Nodes         []int // Node indices forming the boundary element
+	ParentElement int   // Parent volume element (-1 if none)
+	ParentFace    int   // Local face ID within parent element (-1 if none)
 }
 
 // Entity represents a geometric entity (point, curve, surface, volume)
@@ -83,10 +84,10 @@ type Mesh struct {
 	NodeArrayMap     map[int]int // Maps array indices to original node IDs
 
 	// ===== Element Connectivity =====
-	EtoV         [][]int             // Element to vertex connectivity [nelems][nverts_per_elem]
-	ElementTypes []utils.ElementType // Element type for each element
-	ElementTags  [][]int             // All tags for each element (physical, elementary, etc.)
-	ElementIDMap map[int]int         // Maps original element IDs to array indices
+	EtoV         [][]int              // Element to vertex connectivity [nelems][nverts_per_elem]
+	ElementTypes []utils.GeometryType // Element type for each element
+	ElementTags  [][]int              // All tags for each element (physical, elementary, etc.)
+	ElementIDMap map[int]int          // Maps original element IDs to array indices
 
 	// ===== Groups and Sets =====
 	ElementGroups map[int]*ElementGroup // Physical/elementary groups by tag
@@ -164,7 +165,7 @@ func (m *Mesh) AddNodeWithParametric(nodeID int, coords []float64, paramCoords [
 }
 
 // AddElement adds an element with the given ID, type, and connectivity
-func (m *Mesh) AddElement(elemID int, elemType utils.ElementType, tags []int, nodeIDs []int) error {
+func (m *Mesh) AddElement(elemID int, elemType utils.GeometryType, tags []int, nodeIDs []int) error {
 	// Convert node IDs to array indices
 	nodes := make([]int, len(nodeIDs))
 	for i, nid := range nodeIDs {
@@ -216,10 +217,10 @@ func (m *Mesh) GetNodeID(index int) (int, bool) {
 }
 
 // FilterByDimension returns elements of specified dimension
-func (m *Mesh) FilterByDimension(dim int) ([]int, [][]int, []utils.ElementType) {
+func (m *Mesh) FilterByDimension(dim int) ([]int, [][]int, []utils.GeometryType) {
 	var indices []int
 	var elements [][]int
-	var types []utils.ElementType
+	var types []utils.GeometryType
 
 	for i, etype := range m.ElementTypes {
 		if etype.GetDimension() == dim {
@@ -317,7 +318,7 @@ func (m *Mesh) BuildConnectivity() {
 	m.NumFaces = len(m.Faces)
 }
 
-func GetElementFaces(elemType utils.ElementType, vertices []int) [][]int {
+func GetElementFaces(elemType utils.GeometryType, vertices []int) [][]int {
 	return utils.GetElementFaces(elemType, vertices)
 }
 
@@ -344,7 +345,7 @@ func (m *Mesh) PrintStatistics() {
 
 	// Count element types by dimension
 	dimCounts := make(map[int]int)
-	typeCounts := make(map[utils.ElementType]int)
+	typeCounts := make(map[utils.GeometryType]int)
 	for _, t := range m.ElementTypes {
 		typeCounts[t]++
 		dimCounts[t.GetDimension()]++

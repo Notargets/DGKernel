@@ -2,7 +2,7 @@ package readers
 
 import (
 	"fmt"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"os"
 	"path/filepath"
 	"strings"
@@ -494,7 +494,7 @@ func TestReadGmsh4StandardMeshes(t *testing.T) {
 		tm := utils.GetStandardTestMeshes()
 
 		// Build expected types from the test mesh definition
-		var expectedTypes []utils.ElementType
+		var expectedTypes []utils.GeometryType
 		for _, elemSet := range tm.MixedMesh.Elements {
 			for range elemSet.Elements {
 				expectedTypes = append(expectedTypes, elemSet.Type)
@@ -659,7 +659,7 @@ func TestReadGmsh4MixedElementTypes(t *testing.T) {
 	}
 
 	// Get expected types from the actual mixed mesh definition
-	var expectedTypes []utils.ElementType
+	var expectedTypes []utils.GeometryType
 	for _, elemSet := range tm.MixedMesh.Elements {
 		for range elemSet.Elements {
 			expectedTypes = append(expectedTypes, elemSet.Type)

@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/notargets/DGKernel/mesh"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"os"
 	"strconv"
 	"strings"
@@ -87,7 +87,7 @@ func ReadSU2(filename string) (*mesh.Mesh, error) {
 
 			// Pre-allocate slices
 			msh.EtoV = make([][]int, 0, nelem)
-			msh.ElementTypes = make([]utils.ElementType, 0, nelem)
+			msh.ElementTypes = make([]utils.GeometryType, 0, nelem)
 			msh.ElementTags = make([][]int, 0, nelem)
 
 			// Read elements
@@ -191,7 +191,7 @@ func ReadSU2(filename string) (*mesh.Mesh, error) {
 					}
 
 					// Map boundary element type
-					var btype utils.ElementType
+					var btype utils.GeometryType
 					switch boundaryType {
 					case 3: // Line (2D boundary)
 						btype = utils.Line
@@ -253,7 +253,7 @@ func ReadSU2(filename string) (*mesh.Mesh, error) {
 }
 
 // su2ElementTypeMap maps SU2/VTK element type identifiers to our ElementType
-var su2ElementTypeMap = map[int]utils.ElementType{
+var su2ElementTypeMap = map[int]utils.GeometryType{
 	3:  utils.Line,     // VTK_LINE
 	5:  utils.Triangle, // VTK_TRIANGLE
 	9:  utils.Quad,     // VTK_QUAD

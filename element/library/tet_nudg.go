@@ -2,23 +2,24 @@ package library
 
 import (
 	"github.com/notargets/DGKernel/element"
-	"github.com/notargets/gocfd/DG3D/mesh/readers"
-	"github.com/notargets/gocfd/DG3D/tetrahedra/tetelement"
+	"github.com/notargets/DGKernel/element/library/gonudg"
+	"github.com/notargets/DGKernel/mesh/readers"
+	"github.com/notargets/DGKernel/utils"
 	"gonum.org/v1/gonum/mat"
 )
 
 type TetNudg struct {
-	*tetelement.Element3D
+	*gonudg.DG3D
 }
 
 // GetReferenceElement returns reference element properties and operators
 func (t TetNudg) GetReferenceElement() element.ReferenceElement {
-	return &tetReferenceElement{t.Element3D}
+	return &tetReferenceElement{t.DG3D}
 }
 
 // GetGeometricTransform returns transformation from reference to physical space
 func (t TetNudg) GetGeometricTransform() element.GeometricTransform {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 	return element.GeometricTransform{
 		Rx:       dg.Rx,
 		Ry:       dg.Ry,
@@ -36,7 +37,7 @@ func (t TetNudg) GetGeometricTransform() element.GeometricTransform {
 
 // GetSurfaceGeometry returns face geometry for flux computations
 func (t TetNudg) GetSurfaceGeometry() element.SurfaceGeometry {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 	return element.SurfaceGeometry{
 		Nx:     dg.Nx,
 		Ny:     dg.Ny,
@@ -48,11 +49,11 @@ func (t TetNudg) GetSurfaceGeometry() element.SurfaceGeometry {
 
 // GetProperties returns element metadata
 func (t TetNudg) GetProperties() element.ElementProperties {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 	return element.ElementProperties{
 		Name:       "Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
 		ShortName:  "Tet" + string(rune('0'+dg.N)),
-		Type:       element.Tet,
+		Type:       utils.Tet,
 		Order:      dg.N,
 		Np:         dg.Np,
 		NFp:        dg.Nfp,
@@ -65,7 +66,7 @@ func (t TetNudg) GetProperties() element.ElementProperties {
 
 // GetReferenceGeometry returns node layout in reference space
 func (t TetNudg) GetReferenceGeometry() element.ReferenceGeometry {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 
 	// Convert vectors to slices
 	r := make([]float64, dg.Np)
@@ -93,7 +94,7 @@ func (t TetNudg) GetReferenceGeometry() element.ReferenceGeometry {
 
 // GetNodalModal returns transformation matrices
 func (t TetNudg) GetNodalModal() element.NodalModalMatrices {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 
 	// Compute mass matrix if not available
 	var M mat.Matrix
@@ -123,7 +124,7 @@ func (t TetNudg) GetNodalModal() element.NodalModalMatrices {
 
 // GetReferenceOperators returns differential operators
 func (t TetNudg) GetReferenceOperators() element.ReferenceOperators {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 	return element.ReferenceOperators{
 		Dr:   dg.Dr,
 		Ds:   dg.Ds,
@@ -138,25 +139,26 @@ func NewTetNudg(order int, meshfile string) (tn *TetNudg) {
 	if err != nil {
 		panic(err)
 	}
-	el3d, err := tetelement.NewElement3DFromMesh(order, msh)
-	if err != nil {
-		panic(err)
-	}
-	tn = &TetNudg{Element3D: el3d}
+	_ = msh
+	// el3d, err := tetelement.NewElement3DFromMesh(order, msh)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// tn = &TetNudg{Element3D: el3d}
 	return
 }
 
 // tetReferenceElement implements element.ReferenceElement interface
 type tetReferenceElement struct {
-	*tetelement.Element3D
+	*gonudg.DG3D
 }
 
 func (t *tetReferenceElement) GetProperties() element.ElementProperties {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 	return element.ElementProperties{
 		Name:       "Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
 		ShortName:  "Tet" + string(rune('0'+dg.N)),
-		Type:       element.Tet,
+		Type:       utils.Tet,
 		Order:      dg.N,
 		Np:         dg.Np,
 		NFp:        dg.Nfp,
@@ -168,7 +170,7 @@ func (t *tetReferenceElement) GetProperties() element.ElementProperties {
 }
 
 func (t *tetReferenceElement) GetReferenceGeometry() element.ReferenceGeometry {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 
 	// Convert vectors to slices
 	r := make([]float64, dg.Np)
@@ -194,7 +196,7 @@ func (t *tetReferenceElement) GetReferenceGeometry() element.ReferenceGeometry {
 }
 
 func (t *tetReferenceElement) GetNodalModal() element.NodalModalMatrices {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 
 	// Compute mass matrix if not available
 	var M mat.Matrix
@@ -223,7 +225,7 @@ func (t *tetReferenceElement) GetNodalModal() element.NodalModalMatrices {
 }
 
 func (t *tetReferenceElement) GetReferenceOperators() element.ReferenceOperators {
-	dg := t.Element3D.DG3D
+	dg := t.DG3D
 	return element.ReferenceOperators{
 		Dr:   dg.Dr,
 		Ds:   dg.Ds,

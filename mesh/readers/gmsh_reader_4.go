@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/notargets/DGKernel/mesh"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"os"
 	"strconv"
 	"strings"
@@ -729,7 +729,7 @@ func skipSection(scanner *bufio.Scanner, endMarker string) error {
 }
 
 // gmshElementType4 maps Gmsh v4 element type numbers to our ElementType
-var gmshElementType4 = map[int]utils.ElementType{
+var gmshElementType4 = map[int]utils.GeometryType{
 	1:  utils.Line,      // 2-node line
 	2:  utils.Triangle,  // 3-node triangle
 	3:  utils.Quad,      // 4-node quadrangle

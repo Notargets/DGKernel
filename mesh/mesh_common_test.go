@@ -1,7 +1,7 @@
 package mesh
 
 import (
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"testing"
 )
 
@@ -30,7 +30,7 @@ func TestBuildConnectivity_BasicFunctionality(t *testing.T) {
 			{0, 1, 2, 3}, // Tet 0
 			{1, 2, 3, 4}, // Tet 1 - shares face {1,2,3} with Tet 0
 		},
-		ElementTypes: []utils.ElementType{
+		ElementTypes: []utils.GeometryType{
 			utils.Tet,
 			utils.Tet,
 		},

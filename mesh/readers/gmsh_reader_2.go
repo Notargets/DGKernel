@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/notargets/DGKernel/mesh"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"os"
 	"strconv"
 	"strings"
@@ -254,7 +254,7 @@ func readElements22(scanner *bufio.Scanner, msh *mesh.Mesh) error {
 }
 
 // handleBoundaryElement22 processes boundary elements
-func handleBoundaryElement22(msh *mesh.Mesh, etype utils.ElementType, tags []int, nodeStrs []string) {
+func handleBoundaryElement22(msh *mesh.Mesh, etype utils.GeometryType, tags []int, nodeStrs []string) {
 	// Read nodes
 	numNodes := etype.GetNumNodes()
 	if len(nodeStrs) < numNodes {
@@ -401,7 +401,7 @@ func readPeriodic22(scanner *bufio.Scanner, msh *mesh.Mesh) error {
 }
 
 // gmshElementType22 maps Gmsh v2.2 element type numbers to our ElementType
-var gmshElementType22 = map[int]utils.ElementType{
+var gmshElementType22 = map[int]utils.GeometryType{
 	1:  utils.Line,       // 2-node line
 	2:  utils.Triangle,   // 3-node triangle
 	3:  utils.Quad,       // 4-node quadrangle

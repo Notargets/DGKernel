@@ -2,7 +2,7 @@ package readers
 
 import (
 	"fmt"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"strings"
 )
 
@@ -130,7 +130,7 @@ func (b *Gmsh4TestBuilder) buildElements(mesh *utils.CompleteMesh) string {
 }
 
 // Helper to convert our ElementType to Gmsh element type number
-var elementTypeToGmsh4 = map[utils.ElementType]int{
+var elementTypeToGmsh4 = map[utils.GeometryType]int{
 	utils.Point:      15,
 	utils.Line:       1,
 	utils.Line3:      8,

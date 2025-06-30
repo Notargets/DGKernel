@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/notargets/DGKernel/mesh"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"os"
 	"strconv"
 	"strings"
@@ -80,7 +80,7 @@ func ReadGambitNeutral(filename string) (*mesh.Mesh, error) {
 		} else if strings.Contains(line, "ELEMENTS/CELLS") {
 			// Read elements
 			msh.EtoV = make([][]int, nelem)
-			msh.ElementTypes = make([]utils.ElementType, nelem)
+			msh.ElementTypes = make([]utils.GeometryType, nelem)
 			msh.ElementTags = make([][]int, nelem)
 			msh.ElementIDMap = make(map[int]int)
 
@@ -96,7 +96,7 @@ func ReadGambitNeutral(filename string) (*mesh.Mesh, error) {
 					numNodes, _ := strconv.Atoi(fields[2])
 
 					// Map Gambit element types to mesh types
-					var meshType utils.ElementType
+					var meshType utils.GeometryType
 					switch elemType {
 					case 4: // Hexahedron
 						meshType = utils.Hex

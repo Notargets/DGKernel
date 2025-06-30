@@ -2,7 +2,7 @@ package readers
 
 import (
 	"fmt"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,7 +99,7 @@ func TestReadGmsh22StandardMeshes(t *testing.T) {
 
 		// Get expected types from test mesh
 		tm := utils.GetStandardTestMeshes()
-		var expectedTypes []utils.ElementType
+		var expectedTypes []utils.GeometryType
 		for _, elemSet := range tm.MixedMesh.Elements {
 			for range elemSet.Elements {
 				expectedTypes = append(expectedTypes, elemSet.Type)
@@ -170,7 +170,7 @@ func TestReadGmsh22MixedElementTypes(t *testing.T) {
 	}
 
 	// Build expected types from the test mesh
-	var expectedTypes []utils.ElementType
+	var expectedTypes []utils.GeometryType
 	for _, elemSet := range tm.MixedMesh.Elements {
 		for range elemSet.Elements {
 			expectedTypes = append(expectedTypes, elemSet.Type)
@@ -282,7 +282,7 @@ func TestReadGmsh22AllElementTypes(t *testing.T) {
 	testCases := []struct {
 		name     string
 		mesh     utils.CompleteMesh
-		expected utils.ElementType
+		expected utils.GeometryType
 	}{
 		{
 			name: "SingleTet",
@@ -633,7 +633,7 @@ $EndElements`
 // TestReadGmsh22HigherOrderCornerNodes tests corner node extraction
 func TestReadGmsh22HigherOrderCornerNodes(t *testing.T) {
 	testCases := []struct {
-		elemType        utils.ElementType
+		elemType        utils.GeometryType
 		expectedCorners []int
 	}{
 		{utils.Line3, []int{0, 1}},

@@ -2,7 +2,7 @@ package partitioner
 
 import (
 	"github.com/notargets/DGKernel/mesh"
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 	"testing"
 )
 
@@ -91,13 +91,13 @@ func TestComputeCostModel(t *testing.T) {
 	mp := NewMeshPartitioner(mesh, config)
 
 	// Override the default cost model to include all element types
-	mp.computeCostModel = func(elemType utils.ElementType, numVertices int) int32 {
+	mp.computeCostModel = func(elemType utils.GeometryType, numVertices int) int32 {
 		// For this test, just return the number of vertices as the cost
 		return int32(numVertices)
 	}
 
 	tests := []struct {
-		elemType     utils.ElementType
+		elemType     utils.GeometryType
 		numNodes     int
 		expectedCost int32
 	}{
