@@ -216,7 +216,7 @@ func (t *tetReferenceElement) GetNodalModal() element.NodalModalMatrices {
 
 	return element.NodalModalMatrices{
 		V:    dg.V,
-		Vinv: nil,
+		Vinv: dg.Vinv,
 		M:    M,
 		Minv: Minv,
 	}
