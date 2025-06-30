@@ -6,6 +6,7 @@ toolchain go1.24.4
 
 require (
 	github.com/notargets/gocca v1.2.0
+	github.com/notargets/gocfd v0.1.4-0.20250629235002-db261add7825
 	gonum.org/v1/gonum v0.16.0
 )
 
@@ -25,7 +26,6 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.3.2 // indirect
 	github.com/notargets/avs v0.0.8-0.20250301163939-3d7704630871 // indirect
-	github.com/notargets/gocfd v0.1.4-0.20250625233219-490adf49ab4e // indirect
 	github.com/pelletier/go-toml v1.8.0 // indirect
 	github.com/pradeep-pyro/triangle v0.0.0-20181224021403-536c46311a99 // indirect
 	github.com/spf13/afero v1.2.2 // indirect
