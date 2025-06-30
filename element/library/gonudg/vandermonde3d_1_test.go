@@ -5,7 +5,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/notargets/gocfd/utils"
 	"gonum.org/v1/gonum/mat"
 )
 
@@ -156,10 +155,6 @@ func TestGradVandermonde3DExactDerivatives(t *testing.T) {
 			for _, poly := range testPolynomials {
 				// Evaluate polynomial at nodes
 				fValues := evaluatePolynomialAtNodes(X, Y, Z, poly.i, poly.j, poly.k)
-				fVec := utils.NewVector(len(fValues))
-				for i := 0; i < len(fValues); i++ {
-					fVec.Set(i, fValues[i])
-				}
 
 				// Compute derivatives using matrices
 				// Need to convert utils.Matrix to mat.Matrix for multiplication

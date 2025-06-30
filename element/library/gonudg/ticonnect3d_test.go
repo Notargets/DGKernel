@@ -3,7 +3,7 @@ package gonudg
 import (
 	"testing"
 
-	"github.com/notargets/gocfd/utils"
+	"github.com/notargets/DGKernel/utils"
 )
 
 // Helper function to convert CompleteMesh to EToV format for tiConnect3D
