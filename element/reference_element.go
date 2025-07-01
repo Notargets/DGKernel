@@ -9,7 +9,8 @@ import (
 type Dimensionality uint8
 
 const (
-	D1 Dimensionality = iota // 1D elements (lines, edges)
+	D0 Dimensionality = iota // 0D elements (points)
+	D1                       // 1D elements (lines, edges)
 	D2                       // 2D elements (triangles, quadrilaterals)
 	D3                       // 3D elements (tetrahedra, hexahedra, etc.)
 )

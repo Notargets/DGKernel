@@ -4,8 +4,8 @@ import (
 	"sort"
 )
 
-// tiConnect3D method for DG3D struct - calls the standalone tiConnect3D function
-func (dg *DG3D) tiConnect3D() {
+// tiConnect3D method for NUDGTet struct - calls the standalone tiConnect3D function
+func (dg *NUDGTet) tiConnect3D() {
 	dg.EToE, dg.EToF = tiConnect3D(dg.EToV)
 }
 

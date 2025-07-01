@@ -6,7 +6,7 @@ import (
 
 // Lift3D computes the 3D surface to volume lift operator used in DG formulation
 // Purpose: Compute 3D surface to volume lift operator used in DG formulation
-func (dg *DG3D) Lift3D() error {
+func (dg *NUDGTet) Lift3D() error {
 	Np := dg.Np
 	Nfp := dg.Nfp
 	Nfaces := dg.Nfaces

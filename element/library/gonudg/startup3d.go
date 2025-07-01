@@ -7,8 +7,8 @@ import (
 	"gonum.org/v1/gonum/mat"
 )
 
-// DG3D represents a 3D discontinuous Galerkin solver
-type DG3D struct {
+// NUDGTet represents a 3D discontinuous Galerkin solver
+type NUDGTet struct {
 	// Polynomial order
 	N       int
 	NODETOL float64
@@ -35,7 +35,7 @@ type DG3D struct {
 	LIFT *mat.Dense
 
 	// Face masks - indices of nodes on each face
-	Fmask [][]int
+	Fmask [][]int // [Nfp][Nfaces]
 
 	// Physical coordinates
 	X, Y, Z *mat.Dense
@@ -62,17 +62,16 @@ type DG3D struct {
 	VmapM      []int   // Vertex map minus
 	VmapP      []int   // Vertex map plus
 	MapP, MapM []int
-	MapB       []int   // Boundary nodes
-	VmapB      []int   // Boundary vertex map
-	FmaskF     [][]int // Flattened face mask
+	MapB       []int // Boundary nodes
+	VmapB      []int // Boundary vertex map
 
 	// Surface coordinates
 	Fx, Fy, Fz *mat.Dense // Face coordinates
 }
 
 // NewDG3D creates and initializes a new 3D DG solver
-func NewDG3D(N int, VX, VY, VZ []float64, EToV [][]int) (*DG3D, error) {
-	dg := &DG3D{
+func NewDG3D(N int, VX, VY, VZ []float64, EToV [][]int) (*NUDGTet, error) {
+	dg := &NUDGTet{
 		N:       N,
 		VX:      VX,
 		VY:      VY,
@@ -92,7 +91,7 @@ func NewDG3D(N int, VX, VY, VZ []float64, EToV [][]int) (*DG3D, error) {
 }
 
 // StartUp3D initializes the 3D DG operators
-func (dg *DG3D) StartUp3D() error {
+func (dg *NUDGTet) StartUp3D() error {
 	// Definition of constants
 	dg.Np = (dg.N + 1) * (dg.N + 2) * (dg.N + 3) / 6
 	dg.Nfp = (dg.N + 1) * (dg.N + 2) / 2
@@ -177,7 +176,7 @@ func (dg *DG3D) StartUp3D() error {
 }
 
 // BuildFmask finds all nodes that lie on each face
-func (dg *DG3D) BuildFmask() {
+func (dg *NUDGTet) BuildFmask() {
 	dg.Fmask = make([][]int, 4)
 
 	// Face 1: T = -1
@@ -210,7 +209,7 @@ func (dg *DG3D) BuildFmask() {
 }
 
 // ExtractFaceCoordinates extracts coordinates at face nodes
-func (dg *DG3D) ExtractFaceCoordinates() {
+func (dg *NUDGTet) ExtractFaceCoordinates() {
 	// Create face coordinate matrices
 	dg.Fx = mat.NewDense(dg.Nfp*4, dg.K, nil)
 	dg.Fy = mat.NewDense(dg.Nfp*4, dg.K, nil)

@@ -22,7 +22,7 @@ func TestStartUp3D(t *testing.T) {
 		t.Run(fmt.Sprintf("N=%d", N), func(t *testing.T) {
 			dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 			if err != nil {
-				t.Fatalf("Failed to create DG3D: %v", err)
+				t.Fatalf("Failed to create NUDGTet: %v", err)
 			}
 
 			// Check basic properties
@@ -119,7 +119,7 @@ func TestDG3DSimpleMesh(t *testing.T) {
 	N := 2
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Check that we have 2 elements

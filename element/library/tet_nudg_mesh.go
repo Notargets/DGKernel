@@ -8,11 +8,12 @@ import (
 	"github.com/notargets/DGKernel/mesh/readers"
 	"github.com/notargets/DGKernel/utils"
 	"gonum.org/v1/gonum/mat"
+	"math"
 	"strings"
 )
 
 type TetNudgMesh struct {
-	*gonudg.DG3D
+	*gonudg.NUDGTet
 	*mesh.Mesh
 }
 
@@ -34,7 +35,7 @@ func NewTetNudgMesh(order int, meshfile string) (tn *TetNudgMesh) {
 		VY[i] = v[1]
 		VZ[i] = v[2]
 	}
-	tn.DG3D, err = gonudg.NewDG3D(order, VX, VY, VZ, msh.EtoV)
+	tn.NUDGTet, err = gonudg.NewDG3D(order, VX, VY, VZ, msh.EtoV)
 	if err != nil {
 		panic(err)
 	}
@@ -56,7 +57,9 @@ func (t *TetNudgMesh) String() string {
 	sb.WriteString(fmt.Sprintf("  Type: %v\n", elemProps.Type))
 	sb.WriteString(fmt.Sprintf("  Order: %d\n", elemProps.Order))
 	sb.WriteString(fmt.Sprintf("  Nodes per element (Np): %d\n", elemProps.Np))
+	sb.WriteString(fmt.Sprintf("  Nodes per edge (NEp): %d\n", elemProps.NEp))
 	sb.WriteString(fmt.Sprintf("  Nodes per face (NFp): %d\n", elemProps.NFp))
+	sb.WriteString(fmt.Sprintf("  Nodes strictly interior (not on vertex, edge or face: %d\n", elemProps.NIp))
 	sb.WriteString(fmt.Sprintf("  Vertices per element (NVp): %d\n", elemProps.NVp))
 	sb.WriteString(fmt.Sprintf("  Dimensions: %v\n", elemProps.Dimensions))
 
@@ -149,17 +152,17 @@ func (t *TetNudgMesh) String() string {
 		}
 	}
 
-	// Additional DG3D specific properties if available
-	if t.DG3D != nil {
-		sb.WriteString("\n--- Additional DG3D Properties ---\n")
-		if t.DG3D.VmapM != nil && len(t.DG3D.VmapM) > 0 {
-			sb.WriteString(fmt.Sprintf("  Face connectivity maps (VmapM/VmapP) size: %d\n", len(t.DG3D.VmapM)))
+	// Additional NUDGTet specific properties if available
+	if t.NUDGTet != nil {
+		sb.WriteString("\n--- Additional NUDGTet Properties ---\n")
+		if t.NUDGTet.VmapM != nil && len(t.NUDGTet.VmapM) > 0 {
+			sb.WriteString(fmt.Sprintf("  Face connectivity maps (VmapM/VmapP) size: %d\n", len(t.NUDGTet.VmapM)))
 		}
-		if t.DG3D.MapB != nil && len(t.DG3D.MapB) > 0 {
-			sb.WriteString(fmt.Sprintf("  Boundary nodes: %d\n", len(t.DG3D.MapB)))
+		if t.NUDGTet.MapB != nil && len(t.NUDGTet.MapB) > 0 {
+			sb.WriteString(fmt.Sprintf("  Boundary nodes: %d\n", len(t.NUDGTet.MapB)))
 		}
-		sb.WriteString(fmt.Sprintf("  Face count per element: %d\n", t.DG3D.Nfaces))
-		sb.WriteString(fmt.Sprintf("  Total face nodes: %d\n", t.DG3D.Nfaces*t.DG3D.Nfp*meshProps.NumElements))
+		sb.WriteString(fmt.Sprintf("  Face count per element: %d\n", t.NUDGTet.Nfaces))
+		sb.WriteString(fmt.Sprintf("  Total face nodes: %d\n", t.NUDGTet.Nfaces*t.NUDGTet.Nfp*meshProps.NumElements))
 	}
 
 	sb.WriteString("\n===========================\n")
@@ -234,12 +237,12 @@ func (t *TetNudgMesh) GetMeshProperties() element.MeshProperties {
 
 // GetReferenceElement returns reference element properties and operators
 func (t TetNudgMesh) GetReferenceElement() element.ReferenceElement {
-	return &TetReferenceElement{t.DG3D}
+	return &TetReferenceElement{t.NUDGTet}
 }
 
 // GetGeometricTransform returns transformation from reference to physical space
 func (t TetNudgMesh) GetGeometricTransform() element.GeometricTransform {
-	dg := t.DG3D
+	dg := t.NUDGTet
 	return element.GeometricTransform{
 		Rx:       dg.Rx,
 		Ry:       dg.Ry,
@@ -257,7 +260,7 @@ func (t TetNudgMesh) GetGeometricTransform() element.GeometricTransform {
 
 // GetSurfaceGeometry returns face geometry for flux computations
 func (t TetNudgMesh) GetSurfaceGeometry() element.SurfaceGeometry {
-	dg := t.DG3D
+	dg := t.NUDGTet
 	return element.SurfaceGeometry{
 		Nx:     dg.Nx,
 		Ny:     dg.Ny,
@@ -269,53 +272,117 @@ func (t TetNudgMesh) GetSurfaceGeometry() element.SurfaceGeometry {
 
 // TetReferenceElement implements element.ReferenceElement interface
 type TetReferenceElement struct {
-	*gonudg.DG3D
+	*gonudg.NUDGTet
 }
 
 func (t *TetReferenceElement) GetProperties() element.ElementProperties {
-	dg := t.DG3D
+	dg := t.NUDGTet
+	rg := t.GetReferenceGeometry()
 	return element.ElementProperties{
 		Name:       "Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
 		ShortName:  "Tet" + string(rune('0'+dg.N)),
 		Type:       utils.Tet,
 		Order:      dg.N,
 		Np:         dg.Np,
-		NFp:        dg.Nfp,
-		NEp:        0, // Would need to compute from order
-		NVp:        4, // Tetrahedron has 4 vertices
-		NIp:        0, // Would need to compute interior points
+		NFp:        len(rg.FacePoints[0]),
+		NEp:        len(rg.EdgePoints[0]),
+		NVp:        len(rg.VertexPoints),
+		NIp:        len(rg.InteriorPoints),
 		Dimensions: element.D3,
 	}
 }
 
 func (t *TetReferenceElement) GetReferenceGeometry() element.ReferenceGeometry {
-	dg := t.DG3D
+	dg := t.NUDGTet
 
 	// Convert vectors to slices
 	r := make([]float64, dg.Np)
 	s := make([]float64, dg.Np)
 	tt := make([]float64, dg.Np)
 
+	// Create storage for vertex and edge indices
+	vtx := make([]int, 4)
+	edgePts := make([][]int, 6) // 6 edges in a tetrahedron
+	for i := range edgePts {
+		edgePts[i] = make([]int, 0) // Will grow as we find edge points
+	}
+	interiorOnly := make([]int, dg.Np)
+
+	var ii int
 	for i := 0; i < dg.Np; i++ {
 		r[i] = dg.R[i]
 		s[i] = dg.S[i]
 		tt[i] = dg.T[i]
+		R, S, T := r[i], s[i], tt[i]
+
+		// Check for vertex points
+		if (isEq(R, -1) && isEq(S, -1) && isEq(T, -1)) ||
+			(isEq(R, 1) && isEq(S, -1) && isEq(T, -1)) ||
+			(isEq(R, -1) && isEq(S, 1) && isEq(T, -1)) ||
+			(isEq(R, -1) && isEq(S, -1) && isEq(T, 1)) {
+			vtx[ii] = i
+			ii++
+			interiorOnly[i]--
+		}
+		// Check for edge points (including vertices at endpoints)
+		// Edge 0: between vertices 0 (-1,-1,-1) and 1 (1,-1,-1)
+		// Points on this edge have S=-1, T=-1
+		if isEq(S, -1) && isEq(T, -1) {
+			edgePts[0] = append(edgePts[0], i)
+			interiorOnly[i]--
+		} else if isEq(R, -1) && isEq(T, -1) {
+			// Edge 1: between vertices 0 (-1,-1,-1) and 2 (-1,1,-1)
+			// Points on this edge have R=-1, T=-1
+			edgePts[1] = append(edgePts[1], i)
+			interiorOnly[i]--
+		} else if isEq(R, -1) && isEq(S, -1) {
+			// Edge 2: between vertices 0 (-1,-1,-1) and 3 (-1,-1,1)
+			// Points on this edge have R=-1, S=-1
+			edgePts[2] = append(edgePts[2], i)
+			interiorOnly[i]--
+		} else if isEq(T, -1) && isEq(R+S, 0) {
+			// Edge 3: between vertices 1 (1,-1,-1) and 2 (-1,1,-1)
+			// Points on this edge have T=-1, and R+S=0
+			edgePts[3] = append(edgePts[3], i)
+			interiorOnly[i]--
+		} else if isEq(S, -1) && isEq(R+T, 0) {
+			// Edge 4: between vertices 1 (1,-1,-1) and 3 (-1,-1,1)
+			// Points on this edge have S=-1, and R+T=0
+			edgePts[4] = append(edgePts[4], i)
+			interiorOnly[i]--
+		} else if isEq(R, -1) && isEq(S+T, 0) {
+			// Edge 5: between vertices 2 (-1,1,-1) and 3 (-1,-1,1)
+			// Points on this edge have R=-1, and S+T=0
+			edgePts[5] = append(edgePts[5], i)
+			interiorOnly[i]--
+		}
 	}
 
-	// TODO: Properly classify nodes by topological entity
+	var intOnly []int
+	for i := range interiorOnly {
+		if interiorOnly[i] == 0 {
+			intOnly = append(intOnly, i)
+		}
+	}
+
 	return element.ReferenceGeometry{
 		R:              r,
 		S:              s,
 		T:              tt,
-		VertexPoints:   nil,
-		EdgePoints:     nil,
-		FacePoints:     nil,
-		InteriorPoints: nil,
+		VertexPoints:   vtx,
+		EdgePoints:     edgePts,
+		FacePoints:     dg.Fmask,
+		InteriorPoints: intOnly,
 	}
 }
 
+func isEq(a, b float64) bool {
+	tol := 1.e-9
+	return math.Abs(a-b) < tol
+}
+
 func (t *TetReferenceElement) GetNodalModal() element.NodalModalMatrices {
-	dg := t.DG3D
+	dg := t.NUDGTet
 
 	// Compute mass matrix if not available
 	var M mat.Matrix
@@ -344,7 +411,7 @@ func (t *TetReferenceElement) GetNodalModal() element.NodalModalMatrices {
 }
 
 func (t *TetReferenceElement) GetReferenceOperators() element.ReferenceOperators {
-	dg := t.DG3D
+	dg := t.NUDGTet
 	return element.ReferenceOperators{
 		Dr:   dg.Dr,
 		Ds:   dg.Ds,

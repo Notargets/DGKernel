@@ -18,7 +18,7 @@ func TestLift3DSimpleCase(t *testing.T) {
 	N := 1
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// For N=1, we should have Np=4 nodes (vertices of tetrahedron)
@@ -65,7 +65,7 @@ func TestLift3DDimensions(t *testing.T) {
 		t.Run(fmt.Sprintf("N=%d", N), func(t *testing.T) {
 			dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 			if err != nil {
-				t.Fatalf("Failed to create DG3D: %v", err)
+				t.Fatalf("Failed to create NUDGTet: %v", err)
 			}
 
 			// Check LIFT dimensions
@@ -94,7 +94,7 @@ func TestLift3DDiagnostics(t *testing.T) {
 
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Check that nodes are within reference tetrahedron
@@ -151,7 +151,7 @@ func TestLift3DBasicProperties(t *testing.T) {
 
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Test 1: LIFT should have finite values
@@ -221,7 +221,7 @@ func TestLift3DConstantFunction(t *testing.T) {
 
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Create a vector representing constant value 1.0 on all face nodes
@@ -265,7 +265,7 @@ func TestLift3DFaceConsistency(t *testing.T) {
 
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Test that LIFT correctly lifts face polynomials
@@ -307,7 +307,7 @@ func TestLift3DOrthogonality(t *testing.T) {
 
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// The LIFT operator should satisfy certain orthogonality properties
@@ -339,7 +339,7 @@ func TestLift3DSymmetry(t *testing.T) {
 
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Due to the structure of the reference tetrahedron,

@@ -8,7 +8,7 @@ import (
 )
 
 // GeometricFactors3D computes the metric elements for the local mappings of the elements
-func (dg *DG3D) GeometricFactors3D() error {
+func (dg *NUDGTet) GeometricFactors3D() error {
 	// Calculate geometric factors
 	// xr = Dr*X, xs = Ds*X, xt = Dt*X
 	var xr, xs, xt mat.Dense
@@ -79,7 +79,7 @@ func (dg *DG3D) GeometricFactors3D() error {
 }
 
 // Normals3D computes outward pointing normals at element faces and surface Jacobians
-func (dg *DG3D) Normals3D() error {
+func (dg *NUDGTet) Normals3D() error {
 	// First compute geometric factors
 	if err := dg.GeometricFactors3D(); err != nil {
 		return err
@@ -185,7 +185,7 @@ func (dg *DG3D) Normals3D() error {
 }
 
 // ComputeFscale computes the ratio of face Jacobians for flux computations
-func (dg *DG3D) ComputeFscale() {
+func (dg *NUDGTet) ComputeFscale() {
 	// Compute Fscale = SJ ./ J(Fmask,:)
 	Nfp := dg.Nfp
 	Nfaces := dg.Nfaces

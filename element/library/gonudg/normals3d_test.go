@@ -20,7 +20,7 @@ func TestNormals3DBasicProperties(t *testing.T) {
 		t.Run(fmt.Sprintf("N=%d", N), func(t *testing.T) {
 			dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 			if err != nil {
-				t.Fatalf("Failed to create DG3D: %v", err)
+				t.Fatalf("Failed to create NUDGTet: %v", err)
 			}
 
 			// Test 1: All normals should be unit vectors
@@ -70,7 +70,7 @@ func TestNormals3DOutwardPointing(t *testing.T) {
 	N := 2
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// For each face, verify normal points outward
@@ -139,7 +139,7 @@ func TestNormals3DMetricIdentities(t *testing.T) {
 	N := 3
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Test metric identities
@@ -207,7 +207,7 @@ func TestNormals3DSurfaceArea(t *testing.T) {
 	N := 3
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// For this tetrahedron:
@@ -265,7 +265,7 @@ func TestNormals3DJacobianScaling(t *testing.T) {
 			N := 2
 			dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 			if err != nil {
-				t.Fatalf("Failed to create DG3D: %v", err)
+				t.Fatalf("Failed to create NUDGTet: %v", err)
 			}
 
 			// Volume should scale as scale^3
@@ -307,7 +307,7 @@ func TestNormals3DHigherOrder(t *testing.T) {
 		t.Run(fmt.Sprintf("N=%d", N), func(t *testing.T) {
 			dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 			if err != nil {
-				t.Fatalf("Failed to create DG3D: %v", err)
+				t.Fatalf("Failed to create NUDGTet: %v", err)
 			}
 
 			// Measure variation in normals across each face
@@ -369,7 +369,7 @@ func TestNormals3DMultipleElements(t *testing.T) {
 	N := 2
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Check that both elements have positive Jacobians

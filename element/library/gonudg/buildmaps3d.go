@@ -1,8 +1,8 @@
 package gonudg
 
 // BuildMaps3D builds connectivity and boundary tables for nodes
-// This populates VmapM, VmapP, MapM, MapP, MapB, and VmapB in the DG3D struct
-func (dg *DG3D) BuildMaps3D() {
+// This populates VmapM, VmapP, MapM, MapP, MapB, and VmapB in the NUDGTet struct
+func (dg *NUDGTet) BuildMaps3D() {
 	// Initialize arrays
 	NF := dg.Nfp * dg.Nfaces
 	dg.VmapM = make([]int, NF*dg.K)
@@ -43,7 +43,7 @@ func (dg *DG3D) BuildMaps3D() {
 }
 
 // buildFaceConnectivity creates face-to-face mappings for interior faces
-func (dg *DG3D) buildFaceConnectivity() {
+func (dg *NUDGTet) buildFaceConnectivity() {
 	NF := dg.Nfp * dg.Nfaces
 
 	// Extract coordinate data into flat arrays for compatibility
@@ -153,7 +153,7 @@ func (dg *DG3D) buildFaceConnectivity() {
 }
 
 // buildBoundaryMaps finds and stores boundary node information
-func (dg *DG3D) buildBoundaryMaps() {
+func (dg *NUDGTet) buildBoundaryMaps() {
 	// Create lists of boundary nodes
 	mapB := make([]int, 0)
 	vmapB := make([]int, 0)

@@ -9,7 +9,7 @@ import (
 	"github.com/notargets/DGKernel/utils"
 )
 
-// Helper function to convert CompleteMesh to DG3D format
+// Helper function to convert CompleteMesh to NUDGTet format
 func meshToDG3DFormat(m utils.CompleteMesh) (VX, VY, VZ []float64, EToV [][]int) {
 	// Extract vertex coordinates
 	numNodes := len(m.Nodes.Nodes)
@@ -58,7 +58,7 @@ func TestBuildMaps3D_SingleTet_FaceProperties(t *testing.T) {
 		t.Run(fmt.Sprintf("N=%d", N), func(t *testing.T) {
 			dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 			if err != nil {
-				t.Fatalf("Failed to create DG3D: %v", err)
+				t.Fatalf("Failed to create NUDGTet: %v", err)
 			}
 
 			// Test 1: Verify VmapM maps to valid volume nodes
@@ -103,7 +103,7 @@ func TestBuildMaps3D_TwoTets_SharedFaceGeometry(t *testing.T) {
 		t.Run(fmt.Sprintf("N=%d", N), func(t *testing.T) {
 			dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 			if err != nil {
-				t.Fatalf("Failed to create DG3D: %v", err)
+				t.Fatalf("Failed to create NUDGTet: %v", err)
 			}
 
 			// Set up connectivity
@@ -142,7 +142,7 @@ func TestBuildMaps3D_CubeMesh_ConnectivityProperties(t *testing.T) {
 	N := 2 // Use order 2 for this test
 	dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 	if err != nil {
-		t.Fatalf("Failed to create DG3D: %v", err)
+		t.Fatalf("Failed to create NUDGTet: %v", err)
 	}
 
 	// Set up connectivity
@@ -165,7 +165,7 @@ func TestBuildMaps3D_CubeMesh_ConnectivityProperties(t *testing.T) {
 }
 
 // Helper function: Test face node constraints
-func testFaceNodeConstraints(t *testing.T, dg *DG3D, tolerance float64) {
+func testFaceNodeConstraints(t *testing.T, dg *NUDGTet, tolerance float64) {
 	// Face constraints for reference tetrahedron:
 	// Face 0: T = -1
 	// Face 1: S = -1
@@ -205,7 +205,7 @@ func testFaceNodeConstraints(t *testing.T, dg *DG3D, tolerance float64) {
 }
 
 // Helper function: Test reciprocal connectivity
-func testReciprocalConnectivity(t *testing.T, dg *DG3D) {
+func testReciprocalConnectivity(t *testing.T, dg *NUDGTet) {
 	for k := 0; k < dg.K; k++ {
 		for f := 0; f < dg.Nfaces; f++ {
 			neighbor := dg.EToE[k][f]
@@ -228,7 +228,7 @@ func testReciprocalConnectivity(t *testing.T, dg *DG3D) {
 }
 
 // Helper function: Test connected node coordinates
-func testConnectedNodeCoordinates(t *testing.T, dg *DG3D) {
+func testConnectedNodeCoordinates(t *testing.T, dg *NUDGTet) {
 	NF := dg.Nfp * dg.Nfaces
 	tolerance := math.Sqrt(dg.NODETOL)
 
@@ -262,7 +262,7 @@ func testConnectedNodeCoordinates(t *testing.T, dg *DG3D) {
 }
 
 // Helper function: Test boundary/interior exclusion
-func testBoundaryInteriorExclusion(t *testing.T, dg *DG3D) {
+func testBoundaryInteriorExclusion(t *testing.T, dg *NUDGTet) {
 	// Create a set of boundary indices
 	boundarySet := make(map[int]bool)
 	for _, bIdx := range dg.MapB {
@@ -282,7 +282,7 @@ func testBoundaryInteriorExclusion(t *testing.T, dg *DG3D) {
 }
 
 // Helper function: Test interior face uniqueness
-func testInteriorFaceUniqueness(t *testing.T, dg *DG3D) {
+func testInteriorFaceUniqueness(t *testing.T, dg *NUDGTet) {
 	// Map to track face partnerships
 	facePairs := make(map[string]bool)
 
@@ -307,7 +307,7 @@ func testInteriorFaceUniqueness(t *testing.T, dg *DG3D) {
 }
 
 // Helper function: Test global coordinate continuity
-func testGlobalCoordinateContinuity(t *testing.T, dg *DG3D) {
+func testGlobalCoordinateContinuity(t *testing.T, dg *NUDGTet) {
 	tolerance := math.Sqrt(dg.NODETOL)
 
 	// For each element and face
@@ -380,7 +380,7 @@ func TestBuildMaps3D_BoundaryNodeOrdering(t *testing.T) {
 				t.Run(fmt.Sprintf("Order%d", N), func(t *testing.T) {
 					dg, err := NewDG3D(N, VX, VY, VZ, EToV)
 					if err != nil {
-						t.Fatalf("Failed to create DG3D: %v", err)
+						t.Fatalf("Failed to create NUDGTet: %v", err)
 					}
 
 					// Set up connectivity if needed
@@ -410,7 +410,7 @@ func TestBuildMaps3D_BoundaryNodeOrdering(t *testing.T) {
 }
 
 // Helper function: Verify boundary faces are complete
-func verifyBoundaryFaceCompleteness(t *testing.T, dg *DG3D) {
+func verifyBoundaryFaceCompleteness(t *testing.T, dg *NUDGTet) {
 	// Create set of boundary indices for quick lookup
 	boundarySet := make(map[int]bool)
 	for _, bIdx := range dg.MapB {
