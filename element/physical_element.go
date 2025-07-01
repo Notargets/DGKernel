@@ -45,9 +45,17 @@ type SurfaceGeometry struct {
 	FScale mat.Matrix
 }
 
+type MeshProperties struct {
+	NumElements int
+	NumVertices int
+	NumFaces    int
+}
+
 // MeshElement represents a physical element with complete geometric information
 // This combines reference element properties with physical space metrics
 type MeshElement interface {
+	GetMeshProperties() MeshProperties
+
 	// Access to reference space properties and operators
 	GetReferenceElement() ReferenceElement
 
@@ -56,6 +64,8 @@ type MeshElement interface {
 
 	// Surface geometry for flux computations
 	GetSurfaceGeometry() SurfaceGeometry
+
+	String() string // Summary of key stats
 }
 
 // ElementConnectivity defines mesh topology and boundary conditions
