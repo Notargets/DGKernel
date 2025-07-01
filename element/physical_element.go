@@ -49,6 +49,7 @@ type MeshProperties struct {
 	NumElements int
 	NumVertices int
 	NumFaces    int
+	Dimensions  int
 }
 
 // MeshElement represents a physical element with complete geometric information

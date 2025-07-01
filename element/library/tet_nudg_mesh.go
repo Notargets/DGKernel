@@ -23,6 +23,20 @@ func NewTetNudgMesh(order int, meshfile string) (tn *TetNudgMesh) {
 	if err != nil {
 		panic(err)
 	}
+	// Verify that this meshfile has only tetrahedra
+	var foundTet bool
+	var numTets int
+	for _, el := range msh.ElementTypes {
+		if el == utils.Tet {
+			foundTet = true
+			numTets++
+		}
+	}
+	if !foundTet {
+		err = fmt.Errorf("mesh file %s does not have any tets", meshfile)
+		panic(err)
+	}
+	fmt.Printf("Meshfile: %s has %d tets...\n", meshfile, numTets)
 	tn = &TetNudgMesh{
 		Mesh: msh,
 	}
