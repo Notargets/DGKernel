@@ -2,6 +2,20 @@ package utils
 
 // GeometryType represents different finite element types
 
+type GeometryAttributes uint8
+
+const (
+	OtherInput GeometryAttributes = iota
+	PointsPerEdge
+	PointsPerFace
+	PointsPerInterior
+	NumberOfVertices
+	NumberOfEdges
+	NumberOfFaces
+	NumberOfNodalPoints
+	NumberOfModalPoints
+)
+
 type GeometryType uint8
 
 const (
