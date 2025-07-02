@@ -2,33 +2,28 @@ package tetnudg
 
 import (
 	"github.com/notargets/DGKernel/element"
-	"github.com/notargets/DGKernel/utils"
 )
 
-type DRST struct {
+type RefMatrixMacros struct {
 	*TetNudgMesh
-	Dir utils.DirectionType
 }
 
-func NewDRST(dg *TetNudgMesh, dir utils.DirectionType) (drst *DRST) {
-	drst = &DRST{
-		TetNudgMesh: dg,
-		Dir:         dir,
-	}
-	return
+func (dg *TetNudgMesh) NewRefMatrixMacros() *RefMatrixMacros {
+	return &RefMatrixMacros{TetNudgMesh: dg}
 }
 
-func (drst *DRST) GetMacro() string {
+func (rmm *RefMatrixMacros) GetMacro() string {
+	// This returns all base reference element matrices as macros with static
+	// initializers. This should be placed in the kernel global area as a
+	// preamble
+	return element.GenerateMatrixMacros(rmm.GetReferenceElement())
+}
+
+func (rmm *RefMatrixMacros) GetArguments() []element.Argument {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (drst *DRST) GetArguments() []element.Argument {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (drst *DRST) GetKernelSource() string {
-	// TODO implement me
-	panic("implement me")
+func (rmm *RefMatrixMacros) GetKernelSource() string {
+	return ""
 }
