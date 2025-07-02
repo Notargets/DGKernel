@@ -1,4 +1,4 @@
-package library
+package tetnudg
 
 import (
 	"fmt"
@@ -6,6 +6,6 @@ import (
 )
 
 func TestNewTetNudgMesh(t *testing.T) {
-	tm := NewTetNudgMesh(1, "../cube-partitioned.neu")
+	tm := NewTetNudgMesh(1, "cube-partitioned.neu")
 	fmt.Printf("%s", tm.String())
 }
