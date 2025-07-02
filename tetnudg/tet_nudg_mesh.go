@@ -293,8 +293,8 @@ func (t *TetReferenceElement) GetProperties() element.ElementProperties {
 	dg := t.NUDGTet
 	rg := t.GetReferenceGeometry()
 	return element.ElementProperties{
-		Name:       "Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
-		ShortName:  "Tet" + string(rune('0'+dg.N)),
+		Name:       "NUDG Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
+		ShortName:  "NUDGETet" + string(rune('0'+dg.N)),
 		Type:       utils.Tet,
 		Order:      dg.N,
 		Np:         dg.Np,

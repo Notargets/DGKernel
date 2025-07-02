@@ -16,6 +16,17 @@ const (
 	NumberOfModalPoints
 )
 
+type DirectionType uint8
+
+const (
+	XDIR DirectionType = iota
+	YDIR
+	ZDIR
+	RDIR
+	SDIR
+	TDIR
+)
+
 type GeometryType uint8
 
 const (

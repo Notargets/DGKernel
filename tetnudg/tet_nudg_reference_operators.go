@@ -5,30 +5,30 @@ import (
 	"github.com/notargets/DGKernel/utils"
 )
 
-type DXYZ struct {
+type DRST struct {
 	*TetNudgMesh
 	Dir utils.DirectionType
 }
 
-func NewDXYZ(dg *TetNudgMesh, dir utils.DirectionType) (dxyz *DXYZ) {
-	dxyz = &DXYZ{
+func NewDRST(dg *TetNudgMesh, dir utils.DirectionType) (drst *DRST) {
+	drst = &DRST{
 		TetNudgMesh: dg,
 		Dir:         dir,
 	}
 	return
 }
 
-func (dxyz *DXYZ) GetMacro() string {
+func (drst *DRST) GetMacro() string {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (dxyz *DXYZ) GetArguments() []element.Argument {
+func (drst *DRST) GetArguments() []element.Argument {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (dxyz *DXYZ) GetKernelSource() string {
+func (drst *DRST) GetKernelSource() string {
 	// TODO implement me
 	panic("implement me")
 }
