@@ -17,7 +17,7 @@ import (
 )
 
 // ============================================================================
-// Performance Test Suite for OCCA DGKernel
+// Performance Test Suite for OCCA Builder
 // Focused on meaningful performance phenomena with realistic problem sizes
 //
 // CUDA CONSTRAINT: All K values must be <= 1024 due to @inner thread limit
