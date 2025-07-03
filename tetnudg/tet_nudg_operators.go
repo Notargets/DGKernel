@@ -18,11 +18,6 @@ func NewDXYZ(dg *TetNudgMesh, dir utils.DirectionType) (dxyz *DXYZ) {
 	return
 }
 
-func (dxyz *DXYZ) GetMacro() string {
-	// TODO implement me
-	panic("implement me")
-}
-
 func (dxyz *DXYZ) GetArguments() []element.Argument {
 	// TODO implement me
 	panic("implement me")

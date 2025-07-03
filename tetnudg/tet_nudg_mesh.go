@@ -289,6 +289,10 @@ type TetReferenceElement struct {
 	*gonudg.NUDGTet
 }
 
+func (dg *TetNudgMesh) GetRefMatrixMacros() string {
+	return element.GenerateMatrixMacros(dg.GetReferenceElement())
+}
+
 func (t *TetReferenceElement) GetProperties() element.ElementProperties {
 	dg := t.NUDGTet
 	rg := t.GetReferenceGeometry()

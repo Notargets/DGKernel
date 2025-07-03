@@ -34,7 +34,6 @@ type Argument struct {
 }
 
 type Operator interface {
-	GetMacro() string // Used for operators defined as a macro
 	GetArguments() []Argument
 	GetKernelSource() string
 }
