@@ -1,7 +1,8 @@
-package builder
+package runner
 
 import (
 	"fmt"
+	"github.com/notargets/DGKernel/builder"
 	"gonum.org/v1/gonum/mat"
 	"math"
 	"strings"
@@ -16,14 +17,14 @@ import (
 
 // Test 1.1: Device validation
 func TestDGKernel(t *testing.T) {
-	// Test nil device
+	// Test nil Device
 	t.Run("NilDevice", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r == nil {
-				t.Error("Expected panic for nil device")
+				t.Error("Expected panic for nil Device")
 			}
 		}()
-		NewDGKernel(nil, Config{K: []int{10}})
+		NewRunner(nil, builder.Config{K: []int{10}})
 	})
 
 	// Test empty K array
@@ -36,7 +37,7 @@ func TestDGKernel(t *testing.T) {
 				t.Error("Expected panic for empty K array")
 			}
 		}()
-		NewDGKernel(device, Config{K: []int{}})
+		NewRunner(device, builder.Config{K: []int{}})
 	})
 }
 
@@ -45,10 +46,10 @@ func TestDGKernel_Creation_SinglePartition(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         []int{100},
-		FloatType: Float64,
-		IntType:   INT64,
+		FloatType: builder.Float64,
+		IntType:   builder.INT64,
 	})
 	defer kp.Free()
 
@@ -83,7 +84,7 @@ func TestDGKernel_Creation_KpartMaxComputation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			kp := NewDGKernel(device, Config{K: tc.k})
+			kp := NewRunner(device, builder.Config{K: tc.k})
 			defer kp.Free()
 
 			if kp.KpartMax != tc.expectedKMax {
@@ -103,10 +104,10 @@ func TestDGKernel_CodeGen_TypesAndConstants(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         []int{5, 10, 7},
-		FloatType: Float64,
-		IntType:   INT64,
+		FloatType: builder.Float64,
+		IntType:   builder.INT64,
 	})
 	defer kp.Free()
 
@@ -140,7 +141,7 @@ func TestDGKernel_CodeGen_MatrixMacroStructure(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{10, 20}})
+	kp := NewRunner(device, builder.Config{K: []int{10, 20}})
 	defer kp.Free()
 
 	// Add a differentiation matrix
@@ -183,17 +184,17 @@ func TestDGKernel_Memory_SingleArrayAllocation(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{10}})
+	kp := NewRunner(device, builder.Config{K: []int{10}})
 	defer kp.Free()
 
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "data",
 		Size:      10 * 8,
-		Alignment: NoAlignment,
-		DataType:  Float64,
+		Alignment: builder.NoAlignment,
+		DataType:  builder.Float64,
 	}
 
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
@@ -210,7 +211,6 @@ func TestDGKernel_Memory_SingleArrayAllocation(t *testing.T) {
 		t.Error("Offsets not allocated")
 	}
 
-	// Verify allocation tracked
 	arrays := kp.GetAllocatedArrays()
 	if len(arrays) != 1 || arrays[0] != "data" {
 		t.Errorf("Expected allocated arrays [data], got %v", arrays)
@@ -225,13 +225,13 @@ func TestDGKernel_Memory_MultipleArrayAllocation(t *testing.T) {
 	k := []int{10, 15, 20}
 	totalElements := 45
 
-	kp := NewDGKernel(device, Config{K: k})
+	kp := NewRunner(device, builder.Config{K: k})
 	defer kp.Free()
 
-	specs := []ArraySpec{
-		{Name: "U", Size: int64(totalElements * 8), DataType: Float64, Alignment: NoAlignment},
-		{Name: "V", Size: int64(totalElements * 8), DataType: Float64, Alignment: NoAlignment},
-		{Name: "W", Size: int64(totalElements * 8), DataType: Float64, Alignment: NoAlignment},
+	specs := []builder.ArraySpec{
+		{Name: "U", Size: int64(totalElements * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "V", Size: int64(totalElements * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "W", Size: int64(totalElements * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
 	}
 
 	err := kp.AllocateArrays(specs)
@@ -267,12 +267,12 @@ func TestDGKernel_Execution_BasicKernel(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{10}})
+	kp := NewRunner(device, builder.Config{K: []int{10}})
 	defer kp.Free()
 
 	// Allocate simple array
-	err := kp.AllocateArrays([]ArraySpec{
-		{Name: "data", Size: 10 * 8, DataType: Float64, Alignment: NoAlignment},
+	err := kp.AllocateArrays([]builder.ArraySpec{
+		{Name: "data", Size: 10 * 8, DataType: builder.Float64, Alignment: builder.NoAlignment},
 	})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
@@ -329,9 +329,9 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 	k := []int{5, 10}
 	totalNodes := 15 * np
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         k,
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
@@ -345,9 +345,9 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 	kp.AddStaticMatrix("Dr", Dr)
 
 	// Allocate arrays
-	specs := []ArraySpec{
-		{Name: "U", Size: int64(totalNodes * 8), DataType: Float64, Alignment: NoAlignment},
-		{Name: "Ur", Size: int64(totalNodes * 8), DataType: Float64, Alignment: NoAlignment},
+	specs := []builder.ArraySpec{
+		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "Ur", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
 	}
 	err := kp.AllocateArrays(specs)
 	if err != nil {
@@ -417,9 +417,9 @@ func TestDGKernel_Execution_IdentityMatrix(t *testing.T) {
 	k := []int{2, 3}
 	totalNodes := 5 * np
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         k,
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
@@ -432,9 +432,9 @@ func TestDGKernel_Execution_IdentityMatrix(t *testing.T) {
 	kp.AddStaticMatrix("I", I)
 
 	// Allocate arrays
-	specs := []ArraySpec{
-		{Name: "U", Size: int64(totalNodes * 8), DataType: Float64},
-		{Name: "V", Size: int64(totalNodes * 8), DataType: Float64},
+	specs := []builder.ArraySpec{
+		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64},
+		{Name: "V", Size: int64(totalNodes * 8), DataType: builder.Float64},
 	}
 	err := kp.AllocateArrays(specs)
 	if err != nil {
@@ -515,7 +515,7 @@ func TestDGKernel_Incremental_PartitionScaling(t *testing.T) {
 				k[i] = 10 + i*5 // Variable sizes: 10, 15, 20, ...
 			}
 
-			kp := NewDGKernel(device, Config{K: k})
+			kp := NewRunner(device, builder.Config{K: k})
 			defer kp.Free()
 
 			// Verify KpartMax is correct
@@ -530,13 +530,13 @@ func TestDGKernel_Incremental_PartitionScaling(t *testing.T) {
 				totalElements += v
 			}
 
-			spec := ArraySpec{
+			spec := builder.ArraySpec{
 				Name:      "test",
 				Size:      int64(totalElements * 8),
-				Alignment: NoAlignment,
-				DataType:  Float64,
+				Alignment: builder.NoAlignment,
+				DataType:  builder.Float64,
 			}
-			err := kp.AllocateArrays([]ArraySpec{spec})
+			err := kp.AllocateArrays([]builder.ArraySpec{spec})
 			if err != nil {
 				t.Errorf("Allocation failed for %d partitions: %v", numParts, err)
 			}
@@ -566,7 +566,7 @@ func TestDGKernel_EdgeCases_DegeneratePartitions(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			kp := NewDGKernel(device, Config{K: tc.k})
+			kp := NewRunner(device, builder.Config{K: tc.k})
 			defer kp.Free()
 
 			if kp.KpartMax != tc.expectedKMax {
@@ -596,17 +596,17 @@ func TestDGKernel_MathProperties_OffsetCalculations(t *testing.T) {
 	k := []int{10, 15, 20}
 	totalElements := 45
 
-	kp := NewDGKernel(device, Config{K: k})
+	kp := NewRunner(device, builder.Config{K: k})
 	defer kp.Free()
 
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "data",
 		Size:      int64(totalElements * 8),
-		Alignment: NoAlignment,
-		DataType:  Float64,
+		Alignment: builder.NoAlignment,
+		DataType:  builder.Float64,
 	}
 
-	offsets, totalSize := kp.calculateAlignedOffsetsAndSize(spec)
+	offsets, totalSize := kp.CalculateAlignedOffsetsAndSize(spec)
 
 	// Verify offset calculation properties
 	if len(offsets) != len(k)+1 {

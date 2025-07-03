@@ -1,7 +1,8 @@
-package builder
+package runner
 
 import (
 	"fmt"
+	"github.com/notargets/DGKernel/builder"
 	"gonum.org/v1/gonum/mat"
 	"math"
 	"testing"
@@ -18,9 +19,9 @@ func TestDGKernel_MatrixMultiplication_KnownAnswer(t *testing.T) {
 	totalElements := 5
 	totalNodes := totalElements * np
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         k,
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
@@ -34,9 +35,9 @@ func TestDGKernel_MatrixMultiplication_KnownAnswer(t *testing.T) {
 	kp.AddStaticMatrix("TestMat", testMatrix)
 
 	// Allocate arrays
-	specs := []ArraySpec{
-		{Name: "U", Size: int64(totalNodes * 8), DataType: Float64, Alignment: NoAlignment},
-		{Name: "V", Size: int64(totalNodes * 8), DataType: Float64, Alignment: NoAlignment},
+	specs := []builder.ArraySpec{
+		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "V", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
 	}
 	err := kp.AllocateArrays(specs)
 	if err != nil {
@@ -63,7 +64,7 @@ func TestDGKernel_MatrixMultiplication_KnownAnswer(t *testing.T) {
 		expected[elem*np+2] = x + 2*z // Third row
 	}
 
-	// Write to device
+	// Write to Device
 	kp.GetMemory("U").CopyFrom(unsafe.Pointer(&U[0]), int64(totalNodes*8))
 
 	// Kernel using MATMUL macro
@@ -123,9 +124,9 @@ func TestDGKernel_StridedFaceArray(t *testing.T) {
 	faceNodesPerElement := Npface * Nfaces
 	totalFaceNodes := Kmax * faceNodesPerElement
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         []int{Kmax},
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
@@ -140,9 +141,9 @@ func TestDGKernel_StridedFaceArray(t *testing.T) {
 	// Allocate arrays for face data
 	// Key insight: each "element" in K represents Nfaces faces
 	// So we need to process face data in groups of Npface
-	specs := []ArraySpec{
-		{Name: "FaceU", Size: int64(totalFaceNodes * 8), DataType: Float64, Alignment: NoAlignment},
-		{Name: "FaceDU", Size: int64(totalFaceNodes * 8), DataType: Float64, Alignment: NoAlignment},
+	specs := []builder.ArraySpec{
+		{Name: "FaceU", Size: int64(totalFaceNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "FaceDU", Size: int64(totalFaceNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
 	}
 	err := kp.AllocateArrays(specs)
 	if err != nil {
@@ -180,7 +181,7 @@ func TestDGKernel_StridedFaceArray(t *testing.T) {
 		}
 	}
 
-	// Write to device
+	// Write to Device
 	kp.GetMemory("FaceU").CopyFrom(unsafe.Pointer(&faceU[0]), int64(totalFaceNodes*8))
 
 	// Kernel that processes face data with correct stride
@@ -260,9 +261,9 @@ func TestDGKernel_MultipleArraysWithMatMul(t *testing.T) {
 	totalElements := 5
 	totalNodes := totalElements * np
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         k,
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
@@ -287,11 +288,11 @@ func TestDGKernel_MultipleArraysWithMatMul(t *testing.T) {
 	kp.AddStaticMatrix("M", M)
 
 	// Allocate multiple arrays
-	specs := []ArraySpec{
-		{Name: "U", Size: int64(totalNodes * 8), DataType: Float64, Alignment: NoAlignment},
-		{Name: "V", Size: int64(totalNodes * 8), DataType: Float64, Alignment: NoAlignment},
-		{Name: "DU", Size: int64(totalNodes * 8), DataType: Float64, Alignment: NoAlignment},
-		{Name: "MU", Size: int64(totalNodes * 8), DataType: Float64, Alignment: NoAlignment},
+	specs := []builder.ArraySpec{
+		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "V", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "DU", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "MU", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
 	}
 	err := kp.AllocateArrays(specs)
 	if err != nil {
@@ -306,7 +307,7 @@ func TestDGKernel_MultipleArraysWithMatMul(t *testing.T) {
 		V[i] = float64(i) * 0.1
 	}
 
-	// Write to device
+	// Write to Device
 	kp.GetMemory("U").CopyFrom(unsafe.Pointer(&U[0]), int64(totalNodes*8))
 	kp.GetMemory("V").CopyFrom(unsafe.Pointer(&V[0]), int64(totalNodes*8))
 

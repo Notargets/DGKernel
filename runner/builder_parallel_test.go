@@ -1,8 +1,9 @@
-package builder
+package runner
 
 import (
 	"bufio"
 	"fmt"
+	"github.com/notargets/DGKernel/builder"
 	"math"
 	"os"
 	"runtime"
@@ -77,7 +78,7 @@ func computeIterations(expectedTimePerIter time.Duration) int {
 	return iterations
 }
 
-// createTestDevice creates a device for testing, preferring parallel backends
+// createTestDevice creates a Device for testing, preferring parallel backends
 func createTestDevice() *gocca.OCCADevice {
 	// Try OpenCL with different JSON formats, then OpenMP, then CUDA, then fall back to Serial
 	backends := []string{
@@ -92,13 +93,13 @@ func createTestDevice() *gocca.OCCADevice {
 	for _, props := range backends {
 		device, err := gocca.NewDevice(props)
 		if err == nil {
-			fmt.Printf("Created %s device\n", device.Mode())
+			fmt.Printf("Created %s Device\n", device.Mode())
 			return device
 		}
 	}
 
 	// Should not reach here
-	panic("Failed to create any device")
+	panic("Failed to create any Device")
 }
 
 // ============================================================================
@@ -119,9 +120,9 @@ func runMatmulBenchmark(b *testing.B, device *gocca.OCCADevice, K []int, np int,
 	totalNodes := totalElements * np
 
 	// Create kernel program
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         K,
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
@@ -132,24 +133,24 @@ func runMatmulBenchmark(b *testing.B, device *gocca.OCCADevice, K []int, np int,
 
 	// Allocate arrays (U, V, W for the computation chain)
 	// The kernel performs U→V→W→U cyclic operations
-	specs := []ArraySpec{
+	specs := []builder.ArraySpec{
 		{
 			Name:      "U",
 			Size:      int64(totalNodes * DOUBLE_SIZE),
-			DataType:  Float64,
-			Alignment: CacheLineAlign,
+			DataType:  builder.Float64,
+			Alignment: builder.CacheLineAlign,
 		},
 		{
 			Name:      "V",
 			Size:      int64(totalNodes * DOUBLE_SIZE),
-			DataType:  Float64,
-			Alignment: CacheLineAlign,
+			DataType:  builder.Float64,
+			Alignment: builder.CacheLineAlign,
 		},
 		{
 			Name:      "W",
 			Size:      int64(totalNodes * DOUBLE_SIZE),
-			DataType:  Float64,
-			Alignment: CacheLineAlign,
+			DataType:  builder.Float64,
+			Alignment: builder.CacheLineAlign,
 		},
 	}
 
@@ -414,7 +415,7 @@ func BenchmarkPerf_BasicFunctionality(b *testing.B) {
 	b.Run("Serial_Baseline", func(b *testing.B) {
 		device, err := gocca.NewDevice(`{"mode": "Serial"}`)
 		if err != nil {
-			b.Skip("Serial device not available")
+			b.Skip("Serial Device not available")
 		}
 		defer device.Free()
 
@@ -529,7 +530,7 @@ func BenchmarkPerf_BasicFunctionality(b *testing.B) {
 		}
 		b.Logf("Theoretical Linear Speedup: %dx (%d%%)\n", physicalCores, physicalCores*100)
 
-		// Group results by device and np
+		// Group results by Device and np
 		for _, device := range []string{"OpenMP", "CUDA"} {
 			b.Logf("\n--- %s Performance ---", device)
 
@@ -542,7 +543,7 @@ func BenchmarkPerf_BasicFunctionality(b *testing.B) {
 				b.Logf("\nP=%d (np=%d), Serial baseline: %.3f ms",
 					int(math.Sqrt(float64(np))), np, baseline)
 
-				// Find all results for this device and np
+				// Find all results for this Device and np
 				for _, r := range parallelResults {
 					if r.device == device && r.np == np {
 						// WEAK SCALING: multiply by partition count
@@ -874,7 +875,7 @@ func BenchmarkPerf_LoadBalance(b *testing.B) {
 func BenchmarkPerf_CUDA_RealisticScaling(b *testing.B) {
 	device, err := gocca.NewDevice(`{"mode": "CUDA", "device_id": 0}`)
 	if err != nil {
-		b.Skip("CUDA device not available")
+		b.Skip("CUDA Device not available")
 	}
 	defer device.Free()
 

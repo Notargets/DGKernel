@@ -1,7 +1,8 @@
-package builder
+package runner
 
 import (
 	"fmt"
+	"github.com/notargets/DGKernel/builder"
 	"math"
 	"testing"
 	"unsafe"
@@ -17,19 +18,19 @@ func TestGetArrayType_BasicFunctionality(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         []int{10},
-		FloatType: Float64,
-		IntType:   INT32,
+		FloatType: builder.Float64,
+		IntType:   builder.INT32,
 	})
 	defer kp.Free()
 
 	// Allocate arrays with different types
-	specs := []ArraySpec{
-		{Name: "float64_array", Size: 10 * 8, DataType: Float64, Alignment: NoAlignment},
-		{Name: "float32_array", Size: 10 * 4, DataType: Float32, Alignment: NoAlignment},
-		{Name: "int32_array", Size: 10 * 4, DataType: INT32, Alignment: NoAlignment},
-		{Name: "int64_array", Size: 10 * 8, DataType: INT64, Alignment: NoAlignment},
+	specs := []builder.ArraySpec{
+		{Name: "float64_array", Size: 10 * 8, DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "float32_array", Size: 10 * 4, DataType: builder.Float32, Alignment: builder.NoAlignment},
+		{Name: "int32_array", Size: 10 * 4, DataType: builder.INT32, Alignment: builder.NoAlignment},
+		{Name: "int64_array", Size: 10 * 8, DataType: builder.INT64, Alignment: builder.NoAlignment},
 	}
 
 	err := kp.AllocateArrays(specs)
@@ -40,12 +41,12 @@ func TestGetArrayType_BasicFunctionality(t *testing.T) {
 	// Test each array type
 	testCases := []struct {
 		name     string
-		expected DataType
+		expected builder.DataType
 	}{
-		{"float64_array", Float64},
-		{"float32_array", Float32},
-		{"int32_array", INT32},
-		{"int64_array", INT64},
+		{"float64_array", builder.Float64},
+		{"float32_array", builder.Float32},
+		{"int32_array", builder.INT32},
+		{"int64_array", builder.INT64},
 	}
 
 	for _, tc := range testCases {
@@ -66,7 +67,7 @@ func TestGetArrayType_ErrorCases(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{10}})
+	kp := NewRunner(device, builder.Config{K: []int{10}})
 	defer kp.Free()
 
 	// Test non-existent array
@@ -81,33 +82,33 @@ func TestGetArrayLogicalSize_BasicFunctionality(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{10}})
+	kp := NewRunner(device, builder.Config{K: []int{10}})
 	defer kp.Free()
 
 	// Test arrays of different sizes
 	testCases := []struct {
 		name         string
 		size         int64
-		dataType     DataType
+		dataType     builder.DataType
 		expectedSize int
 	}{
-		{"small_float64", 10 * 8, Float64, 10},
-		{"large_float64", 100 * 8, Float64, 100},
-		{"small_float32", 20 * 4, Float32, 20},
-		{"small_int32", 15 * 4, INT32, 15},
-		{"small_int64", 25 * 8, INT64, 25},
+		{"small_float64", 10 * 8, builder.Float64, 10},
+		{"large_float64", 100 * 8, builder.Float64, 100},
+		{"small_float32", 20 * 4, builder.Float32, 20},
+		{"small_int32", 15 * 4, builder.INT32, 15},
+		{"small_int64", 25 * 8, builder.INT64, 25},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec := ArraySpec{
+			spec := builder.ArraySpec{
 				Name:      tc.name,
 				Size:      tc.size,
 				DataType:  tc.dataType,
-				Alignment: NoAlignment,
+				Alignment: builder.NoAlignment,
 			}
 
-			err := kp.AllocateArrays([]ArraySpec{spec})
+			err := kp.AllocateArrays([]builder.ArraySpec{spec})
 			if err != nil {
 				t.Fatalf("Failed to allocate: %v", err)
 			}
@@ -146,7 +147,7 @@ func TestGetArrayLogicalSize_MultiplePartitions(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			kp := NewDGKernel(device, Config{K: tc.k})
+			kp := NewRunner(device, builder.Config{K: tc.k})
 			defer kp.Free()
 
 			totalK := 0
@@ -155,14 +156,14 @@ func TestGetArrayLogicalSize_MultiplePartitions(t *testing.T) {
 			}
 
 			// Allocate with total size = totalK elements * 8 bytes each
-			spec := ArraySpec{
+			spec := builder.ArraySpec{
 				Name:      "test_array",
 				Size:      int64(totalK * 8),
-				DataType:  Float64,
-				Alignment: NoAlignment,
+				DataType:  builder.Float64,
+				Alignment: builder.NoAlignment,
 			}
 
-			err := kp.AllocateArrays([]ArraySpec{spec})
+			err := kp.AllocateArrays([]builder.ArraySpec{spec})
 			if err != nil {
 				t.Fatalf("Failed to allocate: %v", err)
 			}
@@ -185,20 +186,20 @@ func TestCopyArrayToHost_SinglePartition(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         []int{5},
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
 	// Allocate and initialize array
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "data",
 		Size:      5 * 8,
-		DataType:  Float64,
-		Alignment: NoAlignment,
+		DataType:  builder.Float64,
+		Alignment: builder.NoAlignment,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
@@ -236,17 +237,17 @@ func TestCopyArrayToHost_TypeVerification(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{10}})
+	kp := NewRunner(device, builder.Config{K: []int{10}})
 	defer kp.Free()
 
 	// Allocate Float64 array
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "float64_data",
 		Size:      10 * 8,
-		DataType:  Float64,
-		Alignment: NoAlignment,
+		DataType:  builder.Float64,
+		Alignment: builder.NoAlignment,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
@@ -275,19 +276,19 @@ func TestCopyArrayToHost_AllTypes(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{5}})
+	kp := NewRunner(device, builder.Config{K: []int{5}})
 	defer kp.Free()
 
 	// Test all data types
 	testCases := []struct {
 		name     string
-		dataType DataType
+		dataType builder.DataType
 		size     int64
 		copyFunc func() (interface{}, error)
 	}{
 		{
 			name:     "float32",
-			dataType: Float32,
+			dataType: builder.Float32,
 			size:     5 * 4,
 			copyFunc: func() (interface{}, error) {
 				return CopyArrayToHost[float32](kp, "float32")
@@ -295,7 +296,7 @@ func TestCopyArrayToHost_AllTypes(t *testing.T) {
 		},
 		{
 			name:     "float64",
-			dataType: Float64,
+			dataType: builder.Float64,
 			size:     5 * 8,
 			copyFunc: func() (interface{}, error) {
 				return CopyArrayToHost[float64](kp, "float64")
@@ -303,7 +304,7 @@ func TestCopyArrayToHost_AllTypes(t *testing.T) {
 		},
 		{
 			name:     "int32",
-			dataType: INT32,
+			dataType: builder.INT32,
 			size:     5 * 4,
 			copyFunc: func() (interface{}, error) {
 				return CopyArrayToHost[int32](kp, "int32")
@@ -311,7 +312,7 @@ func TestCopyArrayToHost_AllTypes(t *testing.T) {
 		},
 		{
 			name:     "int64",
-			dataType: INT64,
+			dataType: builder.INT64,
 			size:     5 * 8,
 			copyFunc: func() (interface{}, error) {
 				return CopyArrayToHost[int64](kp, "int64")
@@ -321,13 +322,13 @@ func TestCopyArrayToHost_AllTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec := ArraySpec{
+			spec := builder.ArraySpec{
 				Name:      tc.name,
 				Size:      tc.size,
 				DataType:  tc.dataType,
-				Alignment: NoAlignment,
+				Alignment: builder.NoAlignment,
 			}
-			err := kp.AllocateArrays([]ArraySpec{spec})
+			err := kp.AllocateArrays([]builder.ArraySpec{spec})
 			if err != nil {
 				t.Fatalf("Failed to allocate: %v", err)
 			}
@@ -357,32 +358,32 @@ func TestCopyArrayToHost_PaddingRemoval(t *testing.T) {
 	k := []int{3, 5, 7}
 	totalElements := 15
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         k,
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
 	// Allocate with 64-byte alignment
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "aligned_data",
 		Size:      int64(totalElements * 8),
-		DataType:  Float64,
-		Alignment: CacheLineAlign,
+		DataType:  builder.Float64,
+		Alignment: builder.CacheLineAlign,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
 
 	// Get offsets to understand padding
-	offsetsMem := kp.pooledMemory["aligned_data_offsets"]
+	offsetsMem := kp.PooledMemory["aligned_data_offsets"]
 	numOffsets := len(k) + 1
 	offsets := make([]int64, numOffsets)
 	offsetsMem.CopyTo(unsafe.Pointer(&offsets[0]), int64(numOffsets*8))
 
 	// Write test pattern that includes padding areas
-	_, totalSize := kp.calculateAlignedOffsetsAndSize(spec)
+	_, totalSize := kp.CalculateAlignedOffsetsAndSize(spec)
 	paddedData := make([]float64, totalSize/8)
 
 	// Fill with sentinel values
@@ -400,7 +401,7 @@ func TestCopyArrayToHost_PaddingRemoval(t *testing.T) {
 		}
 	}
 
-	// Write to device
+	// Write to Device
 	mem := kp.GetMemory("aligned_data")
 	mem.CopyFrom(unsafe.Pointer(&paddedData[0]), totalSize)
 
@@ -433,16 +434,16 @@ func TestCopyPartitionToHost_SinglePartition(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{5}})
+	kp := NewRunner(device, builder.Config{K: []int{5}})
 	defer kp.Free()
 
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "data",
 		Size:      5 * 8,
-		DataType:  Float64,
-		Alignment: NoAlignment,
+		DataType:  builder.Float64,
+		Alignment: builder.NoAlignment,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
@@ -476,20 +477,20 @@ func TestCopyPartitionToHost_MultiplePartitions(t *testing.T) {
 	defer device.Free()
 
 	k := []int{3, 4, 5}
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         k,
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
 	totalElements := 12
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "data",
 		Size:      int64(totalElements * 8),
-		DataType:  Float64,
-		Alignment: NoAlignment,
+		DataType:  builder.Float64,
+		Alignment: builder.NoAlignment,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
@@ -538,27 +539,27 @@ func TestCopyPartitionToHost_WithAlignment(t *testing.T) {
 	defer device.Free()
 
 	k := []int{3, 5, 7} // Odd sizes to test padding
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:         k,
-		FloatType: Float64,
+		FloatType: builder.Float64,
 	})
 	defer kp.Free()
 
 	totalElements := 15
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "aligned_data",
 		Size:      int64(totalElements * 8),
-		DataType:  Float64,
-		Alignment: CacheLineAlign,
+		DataType:  builder.Float64,
+		Alignment: builder.CacheLineAlign,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
 
 	// Get aligned memory layout info
-	_, totalSize := kp.calculateAlignedOffsetsAndSize(spec)
-	offsetsMem := kp.pooledMemory["aligned_data_offsets"]
+	_, totalSize := kp.CalculateAlignedOffsetsAndSize(spec)
+	offsetsMem := kp.PooledMemory["aligned_data_offsets"]
 	offsets := make([]int64, len(k)+1)
 	offsetsMem.CopyTo(unsafe.Pointer(&offsets[0]), int64((len(k)+1)*8))
 
@@ -578,7 +579,7 @@ func TestCopyPartitionToHost_WithAlignment(t *testing.T) {
 		}
 	}
 
-	// Write to device
+	// Write to Device
 	mem := kp.GetMemory("aligned_data")
 	mem.CopyFrom(unsafe.Pointer(&paddedBuffer[0]), totalSize)
 
@@ -614,16 +615,16 @@ func TestCopyPartitionToHost_InvalidPartitionID(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{K: []int{5, 10}})
+	kp := NewRunner(device, builder.Config{K: []int{5, 10}})
 	defer kp.Free()
 
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "data",
 		Size:      15 * 8,
-		DataType:  Float64,
-		Alignment: NoAlignment,
+		DataType:  builder.Float64,
+		Alignment: builder.NoAlignment,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
@@ -653,17 +654,17 @@ func TestCopyMethods_DegenerateCases(t *testing.T) {
 	defer device.Free()
 
 	// Empty partition (K[i] = 0)
-	kp := NewDGKernel(device, Config{K: []int{0, 5, 0}})
+	kp := NewRunner(device, builder.Config{K: []int{0, 5, 0}})
 	defer kp.Free()
 
 	totalElements := 5
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "data",
 		Size:      int64(totalElements * 8),
-		DataType:  Float64,
-		Alignment: NoAlignment,
+		DataType:  builder.Float64,
+		Alignment: builder.NoAlignment,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
@@ -697,20 +698,20 @@ func TestCopyMethods_Int32Offsets(t *testing.T) {
 	device := createTestDevice()
 	defer device.Free()
 
-	kp := NewDGKernel(device, Config{
+	kp := NewRunner(device, builder.Config{
 		K:       []int{100, 200, 150},
-		IntType: INT32, // Force 32-bit offsets
+		IntType: builder.INT32, // Force 32-bit offsets
 	})
 	defer kp.Free()
 
 	totalElements := 450
-	spec := ArraySpec{
+	spec := builder.ArraySpec{
 		Name:      "large_data",
 		Size:      int64(totalElements * 8),
-		DataType:  Float64,
-		Alignment: NoAlignment,
+		DataType:  builder.Float64,
+		Alignment: builder.NoAlignment,
 	}
-	err := kp.AllocateArrays([]ArraySpec{spec})
+	err := kp.AllocateArrays([]builder.ArraySpec{spec})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
