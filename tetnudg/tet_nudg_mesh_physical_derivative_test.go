@@ -11,7 +11,7 @@ import (
 	"unsafe"
 )
 
-func TestTetNudgMatmul(t *testing.T) {
+func TestTetNudgPhysicalDerivative(t *testing.T) {
 	tn := NewTetNudgMesh(1, "cube-partitioned.neu")
 	Np := tn.Np
 	Ktot := tn.K
