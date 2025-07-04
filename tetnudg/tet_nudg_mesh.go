@@ -227,15 +227,15 @@ func (dg *TetNudgMesh) String() string {
 	return sb.String()
 }
 
-func (dg *TetNudgMesh) GetRefMatrixMacros() string {
-	return element.GenerateMatrixMacros(dg)
+func (dg *TetNudgMesh) GetRefMatrixMacros() map[string]mat.Matrix {
+	return element.GetRefMatrices(dg)
 }
 
 func (dg *TetNudgMesh) GetProperties() element.ElementProperties {
 	rg := dg.GetReferenceGeometry()
 	return element.ElementProperties{
-		Name:       "NUDG Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
-		ShortName:  "NUDGETet" + string(rune('0'+dg.N)),
+		Name:       "Nudg Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
+		ShortName:  "NudgTet" + string(rune('0'+dg.N)),
 		Type:       utils.Tet,
 		Order:      dg.N,
 		Np:         dg.Np,
