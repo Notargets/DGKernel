@@ -2,7 +2,7 @@ package runner
 
 import (
 	"fmt"
-	"github.com/notargets/DGKernel/builder"
+	"github.com/notargets/DGKernel/runner/builder"
 	"math"
 	"testing"
 	"unsafe"

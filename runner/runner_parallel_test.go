@@ -3,7 +3,7 @@ package runner
 import (
 	"bufio"
 	"fmt"
-	"github.com/notargets/DGKernel/builder"
+	"github.com/notargets/DGKernel/runner/builder"
 	"math"
 	"os"
 	"runtime"
