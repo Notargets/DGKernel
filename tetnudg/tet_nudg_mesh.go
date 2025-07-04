@@ -107,7 +107,7 @@ func (dg *TetNudgMesh) String() string {
 	sb.WriteString("=== TetNudgMesh Summary ===\n")
 
 	// Reference Element Properties
-	refElem := dg.GetReferenceElement()
+	refElem := dg
 	elemProps := refElem.GetProperties()
 	sb.WriteString("\n--- Reference Element Properties ---\n")
 	sb.WriteString(fmt.Sprintf("  Name: %s (%s)\n", elemProps.Name, elemProps.ShortName))
@@ -228,11 +228,11 @@ func (dg *TetNudgMesh) String() string {
 }
 
 func (dg *TetNudgMesh) GetRefMatrixMacros() string {
-	return element.GenerateMatrixMacros(dg.GetReferenceElement())
+	return element.GenerateMatrixMacros(dg)
 }
 
 func (dg *TetNudgMesh) GetProperties() element.ElementProperties {
-	rg := dg.GetReferenceElement().GetReferenceGeometry()
+	rg := dg.GetReferenceGeometry()
 	return element.ElementProperties{
 		Name:       "NUDG Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
 		ShortName:  "NUDGETet" + string(rune('0'+dg.N)),
