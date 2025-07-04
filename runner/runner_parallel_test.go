@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
+	"github.com/notargets/DGKernel/utils"
 	"math"
 	"os"
 	"runtime"
@@ -76,30 +77,6 @@ func computeIterations(expectedTimePerIter time.Duration) int {
 		return 100
 	}
 	return iterations
-}
-
-// createTestDevice creates a Device for testing, preferring parallel backends
-func createTestDevice() *gocca.OCCADevice {
-	// Try OpenCL with different JSON formats, then OpenMP, then CUDA, then fall back to Serial
-	backends := []string{
-		// Try without quotes around numbers
-		// `{mode: 'OpenCL', platform_id: 0, device_id: 0}`,
-		// Original OpenMP
-		`{"mode": "OpenMP"}`,
-		`{"mode": "CUDA", "device_id": 0}`,
-		`{"mode": "Serial"}`,
-	}
-
-	for _, props := range backends {
-		device, err := gocca.NewDevice(props)
-		if err == nil {
-			fmt.Printf("Created %s Device\n", device.Mode())
-			return device
-		}
-	}
-
-	// Should not reach here
-	panic("Failed to create any Device")
 }
 
 // ============================================================================
@@ -310,14 +287,6 @@ func generateUniformK(numPartitions, elementsPerPartition int) []int {
 // ============================================================================
 // ESSENTIAL PERFORMANCE TESTS
 // ============================================================================
-// 2. Add this struct before BenchmarkPerf_BasicFunctionality:
-type testResult struct {
-	name   string
-	timeMs float64
-	gflops float64
-	device string
-}
-
 // getPhysicalCoreCountLinux reads /proc/cpuinfo to get actual physical core count
 func getPhysicalCoreCountLinux() (int, error) {
 	file, err := os.Open("/proc/cpuinfo")
@@ -402,6 +371,7 @@ func getPhysicalCoreCount() int {
 	}
 	return logicalCores
 }
+
 func BenchmarkPerf_BasicFunctionality(b *testing.B) {
 	// System info
 	logicalCores := runtime.NumCPU()
@@ -759,7 +729,7 @@ func BenchmarkPerf_StrongScaling(b *testing.B) {
 // BenchmarkPerf_LoadBalance tests impact of uneven work distribution
 // This demonstrates a real performance issue with realistic element counts
 func BenchmarkPerf_LoadBalance(b *testing.B) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	np := 10             // P=2: (3)(4)(5)/6 = 10 volume points

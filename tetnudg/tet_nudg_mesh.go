@@ -227,10 +227,6 @@ func (dg *TetNudgMesh) String() string {
 	return sb.String()
 }
 
-func (dg *TetNudgMesh) GetRefMatrixMacros() map[string]mat.Matrix {
-	return element.GetRefMatrices(dg)
-}
-
 func (dg *TetNudgMesh) GetProperties() element.ElementProperties {
 	rg := dg.GetReferenceGeometry()
 	return element.ElementProperties{

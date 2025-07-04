@@ -3,6 +3,7 @@ package runner
 import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
+	"github.com/notargets/DGKernel/utils"
 	"gonum.org/v1/gonum/mat"
 	"math"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 // Test proper matrix multiplication with known results
 func TestDGKernel_MatrixMultiplication_KnownAnswer(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	np := 3
@@ -112,7 +113,7 @@ func TestDGKernel_MatrixMultiplication_KnownAnswer(t *testing.T) {
 
 // Test strided array layout for face data
 func TestDGKernel_StridedFaceArray(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	// Simulate face data structure
@@ -253,7 +254,7 @@ func TestDGKernel_StridedFaceArray(t *testing.T) {
 
 // Test multiple arrays passed to kernel with matrix operations
 func TestDGKernel_MultipleArraysWithMatMul(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	np := 4

@@ -3,6 +3,7 @@ package runner
 import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
+	"github.com/notargets/DGKernel/utils"
 	"gonum.org/v1/gonum/mat"
 	"math"
 	"strings"
@@ -29,7 +30,7 @@ func TestDGKernel(t *testing.T) {
 
 	// Test empty K array
 	t.Run("EmptyKArray", func(t *testing.T) {
-		device := createTestDevice()
+		device := utils.CreateTestDevice()
 		defer device.Free()
 
 		defer func() {
@@ -43,7 +44,7 @@ func TestDGKernel(t *testing.T) {
 
 // Test 1.2: Single partition creation
 func TestDGKernel_Creation_SinglePartition(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
@@ -67,7 +68,7 @@ func TestDGKernel_Creation_SinglePartition(t *testing.T) {
 
 // Test 1.3: KpartMax computation with multiple partitions
 func TestDGKernel_Creation_KpartMaxComputation(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	testCases := []struct {
@@ -101,7 +102,7 @@ func TestDGKernel_Creation_KpartMaxComputation(t *testing.T) {
 
 // Test 2.1: Type definitions and constants generation
 func TestDGKernel_CodeGen_TypesAndConstants(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
@@ -138,7 +139,7 @@ func TestDGKernel_CodeGen_TypesAndConstants(t *testing.T) {
 
 // Test 2.2: Matrix macro generation with @inner loop
 func TestDGKernel_CodeGen_MatrixMacroStructure(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{K: []int{10, 20}})
@@ -181,7 +182,7 @@ func TestDGKernel_CodeGen_MatrixMacroStructure(t *testing.T) {
 
 // Test 3.1: Single array allocation
 func TestDGKernel_Memory_SingleArrayAllocation(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{K: []int{10}})
@@ -219,7 +220,7 @@ func TestDGKernel_Memory_SingleArrayAllocation(t *testing.T) {
 
 // Test 3.2: Multiple array allocation
 func TestDGKernel_Memory_MultipleArrayAllocation(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	k := []int{10, 15, 20}
@@ -264,7 +265,7 @@ func TestDGKernel_Memory_MultipleArrayAllocation(t *testing.T) {
 
 // Test 4.1: Basic kernel build and execution
 func TestDGKernel_Execution_BasicKernel(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{K: []int{10}})
@@ -322,7 +323,7 @@ func TestDGKernel_Execution_BasicKernel(t *testing.T) {
 
 // Test 4.2: Kernel execution with matrix operation
 func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	np := 4
@@ -410,7 +411,7 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 
 // Test 4.3: Kernel execution with identity matrix
 func TestDGKernel_Execution_IdentityMatrix(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	np := 3
@@ -503,7 +504,7 @@ func TestDGKernel_Execution_IdentityMatrix(t *testing.T) {
 
 // Test 5.1: Systematic partition count increase
 func TestDGKernel_Incremental_PartitionScaling(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	// Test increasing partition counts
@@ -551,7 +552,7 @@ func TestDGKernel_Incremental_PartitionScaling(t *testing.T) {
 
 // Test 6.1: Degenerate partition configurations
 func TestDGKernel_EdgeCases_DegeneratePartitions(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	testCases := []struct {
@@ -590,7 +591,7 @@ func TestDGKernel_EdgeCases_DegeneratePartitions(t *testing.T) {
 
 // Test 7.1: Offset calculations preserve total size
 func TestDGKernel_MathProperties_OffsetCalculations(t *testing.T) {
-	device := createTestDevice()
+	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	k := []int{10, 15, 20}
