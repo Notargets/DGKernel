@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+// TetNudgMesh implements element.MeshElement interface
+// TetNudgMesh implements element.ReferenceElement interface
 type TetNudgMesh struct {
 	*gonudg.NUDGTet
 	*mesh.Mesh
@@ -56,15 +58,56 @@ func NewTetNudgMesh(order int, meshfile string) (tn *TetNudgMesh) {
 	return
 }
 
+func (dg *TetNudgMesh) GetMeshProperties() element.MeshProperties {
+	return element.MeshProperties{
+		NumElements: dg.Mesh.NumElements,
+		NumVertices: dg.Mesh.NumVertices,
+		NumFaces:    dg.Mesh.NumFaces,
+	}
+}
+
+// GetReferenceElement returns reference element properties and operators
+func (dg *TetNudgMesh) GetReferenceElement() element.ReferenceElement {
+	return dg
+}
+
+// GetGeometricTransform returns transformation from reference to physical space
+func (dg TetNudgMesh) GetGeometricTransform() element.GeometricTransform {
+	return element.GeometricTransform{
+		Rx:       dg.Rx,
+		Ry:       dg.Ry,
+		Rz:       dg.Rz,
+		Sx:       dg.Sx,
+		Sy:       dg.Sy,
+		Sz:       dg.Sz,
+		Tx:       dg.Tx,
+		Ty:       dg.Ty,
+		Tz:       dg.Tz,
+		J:        dg.J,
+		IsAffine: nil, // Could be computed if needed
+	}
+}
+
+// GetSurfaceGeometry returns face geometry for flux computations
+func (dg TetNudgMesh) GetSurfaceGeometry() element.SurfaceGeometry {
+	return element.SurfaceGeometry{
+		Nx:     dg.Nx,
+		Ny:     dg.Ny,
+		Nz:     dg.Nz,
+		SJ:     dg.SJ,
+		FScale: dg.Fscale,
+	}
+}
+
 // String returns a comprehensive summary of the TetNudgMesh properties
-func (t *TetNudgMesh) String() string {
+func (dg *TetNudgMesh) String() string {
 	var sb strings.Builder
 
 	// Header
 	sb.WriteString("=== TetNudgMesh Summary ===\n")
 
 	// Reference Element Properties
-	refElem := t.GetReferenceElement()
+	refElem := dg.GetReferenceElement()
 	elemProps := refElem.GetProperties()
 	sb.WriteString("\n--- Reference Element Properties ---\n")
 	sb.WriteString(fmt.Sprintf("  Name: %s (%s)\n", elemProps.Name, elemProps.ShortName))
@@ -124,7 +167,7 @@ func (t *TetNudgMesh) String() string {
 	}
 
 	// Physical Mesh Properties
-	meshProps := t.GetMeshProperties()
+	meshProps := dg.GetMeshProperties()
 	sb.WriteString("\n--- Physical Mesh Properties ---\n")
 	sb.WriteString(fmt.Sprintf("  Number of elements: %d\n", meshProps.NumElements))
 	sb.WriteString(fmt.Sprintf("  Number of vertices: %d\n", meshProps.NumVertices))
@@ -132,7 +175,7 @@ func (t *TetNudgMesh) String() string {
 	sb.WriteString(fmt.Sprintf("  Total degrees of freedom: %d\n", meshProps.NumElements*elemProps.Np))
 
 	// Geometric Transform Properties
-	geoTrans := t.GetGeometricTransform()
+	geoTrans := dg.GetGeometricTransform()
 	sb.WriteString("\n--- Geometric Transform ---\n")
 	if geoTrans.J != nil {
 		r, c := geoTrans.J.Dims()
@@ -150,7 +193,7 @@ func (t *TetNudgMesh) String() string {
 	}
 
 	// Surface Geometry Properties
-	surfGeom := t.GetSurfaceGeometry()
+	surfGeom := dg.GetSurfaceGeometry()
 	sb.WriteString("\n--- Surface Geometry ---\n")
 	if surfGeom.Nx != nil {
 		sb.WriteString(fmt.Sprintf("  Surface normals present: Nx, Ny, Nz\n"))
@@ -167,16 +210,16 @@ func (t *TetNudgMesh) String() string {
 	}
 
 	// Additional NUDGTet specific properties if available
-	if t.NUDGTet != nil {
+	if dg.NUDGTet != nil {
 		sb.WriteString("\n--- Additional NUDGTet Properties ---\n")
-		if t.NUDGTet.VmapM != nil && len(t.NUDGTet.VmapM) > 0 {
-			sb.WriteString(fmt.Sprintf("  Face connectivity maps (VmapM/VmapP) size: %d\n", len(t.NUDGTet.VmapM)))
+		if dg.NUDGTet.VmapM != nil && len(dg.NUDGTet.VmapM) > 0 {
+			sb.WriteString(fmt.Sprintf("  Face connectivity maps (VmapM/VmapP) size: %d\n", len(dg.NUDGTet.VmapM)))
 		}
-		if t.NUDGTet.MapB != nil && len(t.NUDGTet.MapB) > 0 {
-			sb.WriteString(fmt.Sprintf("  Boundary nodes: %d\n", len(t.NUDGTet.MapB)))
+		if dg.NUDGTet.MapB != nil && len(dg.NUDGTet.MapB) > 0 {
+			sb.WriteString(fmt.Sprintf("  Boundary nodes: %d\n", len(dg.NUDGTet.MapB)))
 		}
-		sb.WriteString(fmt.Sprintf("  Face count per element: %d\n", t.NUDGTet.Nfaces))
-		sb.WriteString(fmt.Sprintf("  Total face nodes: %d\n", t.NUDGTet.Nfaces*t.NUDGTet.Nfp*meshProps.NumElements))
+		sb.WriteString(fmt.Sprintf("  Face count per element: %d\n", dg.NUDGTet.Nfaces))
+		sb.WriteString(fmt.Sprintf("  Total face nodes: %d\n", dg.NUDGTet.Nfaces*dg.NUDGTet.Nfp*meshProps.NumElements))
 	}
 
 	sb.WriteString("\n===========================\n")
@@ -184,118 +227,12 @@ func (t *TetNudgMesh) String() string {
 	return sb.String()
 }
 
-// Helper functions for finding min/max of float64 slices
-func minFloat64(s []float64) float64 {
-	if len(s) == 0 {
-		return 0
-	}
-	min := s[0]
-	for _, v := range s[1:] {
-		if v < min {
-			min = v
-		}
-	}
-	return min
-}
-
-func maxFloat64(s []float64) float64 {
-	if len(s) == 0 {
-		return 0
-	}
-	max := s[0]
-	for _, v := range s[1:] {
-		if v > max {
-			max = v
-		}
-	}
-	return max
-}
-
-// matrixMinMax extracts the minimum and maximum values from a matrix
-func matrixMinMax(m mat.Matrix) (min, max float64) {
-	if m == nil {
-		return 0, 0
-	}
-
-	r, c := m.Dims()
-	if r == 0 || c == 0 {
-		return 0, 0
-	}
-
-	// Initialize with first element
-	min = m.At(0, 0)
-	max = min
-
-	// Iterate through all elements
-	for i := 0; i < r; i++ {
-		for j := 0; j < c; j++ {
-			val := m.At(i, j)
-			if val < min {
-				min = val
-			}
-			if val > max {
-				max = val
-			}
-		}
-	}
-
-	return min, max
-}
-func (t *TetNudgMesh) GetMeshProperties() element.MeshProperties {
-	return element.MeshProperties{
-		NumElements: t.Mesh.NumElements,
-		NumVertices: t.Mesh.NumVertices,
-		NumFaces:    t.Mesh.NumFaces,
-	}
-}
-
-// GetReferenceElement returns reference element properties and operators
-func (t TetNudgMesh) GetReferenceElement() element.ReferenceElement {
-	return &TetReferenceElement{t.NUDGTet}
-}
-
-// GetGeometricTransform returns transformation from reference to physical space
-func (t TetNudgMesh) GetGeometricTransform() element.GeometricTransform {
-	dg := t.NUDGTet
-	return element.GeometricTransform{
-		Rx:       dg.Rx,
-		Ry:       dg.Ry,
-		Rz:       dg.Rz,
-		Sx:       dg.Sx,
-		Sy:       dg.Sy,
-		Sz:       dg.Sz,
-		Tx:       dg.Tx,
-		Ty:       dg.Ty,
-		Tz:       dg.Tz,
-		J:        dg.J,
-		IsAffine: nil, // Could be computed if needed
-	}
-}
-
-// GetSurfaceGeometry returns face geometry for flux computations
-func (t TetNudgMesh) GetSurfaceGeometry() element.SurfaceGeometry {
-	dg := t.NUDGTet
-	return element.SurfaceGeometry{
-		Nx:     dg.Nx,
-		Ny:     dg.Ny,
-		Nz:     dg.Nz,
-		SJ:     dg.SJ,
-		FScale: dg.Fscale,
-	}
-}
-
-// TetReferenceElement implements element.ReferenceElement interface
-type TetReferenceElement struct {
-	*gonudg.NUDGTet
-}
-
 func (dg *TetNudgMesh) GetRefMatrixMacros() string {
 	return element.GenerateMatrixMacros(dg.GetReferenceElement())
 }
 
-func (t *TetReferenceElement) GetProperties() element.ElementProperties {
-	dg := t.NUDGTet
-	rg := t.GetReferenceGeometry()
+func (dg *TetNudgMesh) GetProperties() element.ElementProperties {
+	rg := dg.GetReferenceElement().GetReferenceGeometry()
 	return element.ElementProperties{
 		Name:       "NUDG Lagrange Tetrahedron Order " + string(rune('0'+dg.N)),
 		ShortName:  "NUDGETet" + string(rune('0'+dg.N)),
@@ -310,9 +247,7 @@ func (t *TetReferenceElement) GetProperties() element.ElementProperties {
 	}
 }
 
-func (t *TetReferenceElement) GetReferenceGeometry() element.ReferenceGeometry {
-	dg := t.NUDGTet
-
+func (dg *TetNudgMesh) GetReferenceGeometry() element.ReferenceGeometry {
 	// Convert vectors to slices
 	r := make([]float64, dg.Np)
 	s := make([]float64, dg.Np)
@@ -399,9 +334,7 @@ func isEq(a, b float64) bool {
 	return math.Abs(a-b) < tol
 }
 
-func (t *TetReferenceElement) GetNodalModal() element.NodalModalMatrices {
-	dg := t.NUDGTet
-
+func (dg *TetNudgMesh) GetNodalModal() element.NodalModalMatrices {
 	// Compute mass matrix if not available
 	var M mat.Matrix
 	if !dg.V.IsEmpty() {
@@ -428,12 +361,69 @@ func (t *TetReferenceElement) GetNodalModal() element.NodalModalMatrices {
 	}
 }
 
-func (t *TetReferenceElement) GetReferenceOperators() element.ReferenceOperators {
-	dg := t.NUDGTet
+func (dg *TetNudgMesh) GetReferenceOperators() element.ReferenceOperators {
 	return element.ReferenceOperators{
 		Dr:   dg.Dr,
 		Ds:   dg.Ds,
 		Dt:   dg.Dt,
 		LIFT: dg.LIFT,
 	}
+}
+
+// Helper functions for finding min/max of float64 slices
+func minFloat64(s []float64) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	min := s[0]
+	for _, v := range s[1:] {
+		if v < min {
+			min = v
+		}
+	}
+	return min
+}
+
+func maxFloat64(s []float64) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	max := s[0]
+	for _, v := range s[1:] {
+		if v > max {
+			max = v
+		}
+	}
+	return max
+}
+
+// matrixMinMax extracts the minimum and maximum values from a matrix
+func matrixMinMax(m mat.Matrix) (min, max float64) {
+	if m == nil {
+		return 0, 0
+	}
+
+	r, c := m.Dims()
+	if r == 0 || c == 0 {
+		return 0, 0
+	}
+
+	// Initialize with first element
+	min = m.At(0, 0)
+	max = min
+
+	// Iterate through all elements
+	for i := 0; i < r; i++ {
+		for j := 0; j < c; j++ {
+			val := m.At(i, j)
+			if val < min {
+				min = val
+			}
+			if val > max {
+				max = val
+			}
+		}
+	}
+
+	return min, max
 }

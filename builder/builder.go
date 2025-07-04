@@ -45,6 +45,8 @@ type Builder struct {
 	FloatType DataType
 	IntType   DataType
 
+	// Reference Elements
+
 	// Static data to embed
 	StaticMatrices map[string]mat.Matrix
 
