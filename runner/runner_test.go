@@ -280,11 +280,9 @@ func TestDGKernel_Execution_BasicKernel(t *testing.T) {
 	}
 
 	// Simple kernel that sets values
-	kernelSource := `
+	kernelSource := fmt.Sprintf(`
 @kernel void setValues(
-    const int_t* K,
-    real_t* data_global,
-    const int_t* data_offsets
+	%s
 ) {
     for (int part = 0; part < NPART; ++part; @outer) {
        real_t* data = data_PART(part);
@@ -295,7 +293,7 @@ func TestDGKernel_Execution_BasicKernel(t *testing.T) {
           }
        }
     }
-}`
+}`, kp.GenerateKernelSignature())
 
 	kernel, err := kp.BuildKernel(kernelSource, "setValues")
 	if err != nil {
@@ -350,7 +348,8 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 	// Allocate arrays
 	specs := []builder.ArraySpec{
 		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
-		{Name: "Ur", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "Ur", Size: int64(totalNodes * 8), DataType: builder.Float64,
+			Alignment: builder.NoAlignment, IsOutput: true},
 	}
 	err := kp.AllocateArrays(specs)
 	if err != nil {
@@ -369,11 +368,7 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 #define NP %d
 
 @kernel void differentiate(
-	const int_t* K,
-	const real_t* U_global,
-	const int_t* U_offsets,
-	real_t* Ur_global,
-	const int_t* Ur_offsets
+	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		const real_t* U = U_PART(part);
@@ -381,7 +376,7 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 		MATMUL_Dr(U, Ur, K[part]);
 	}
 }
-`, np)
+`, np, kp.GenerateKernelSignature())
 
 	_, err = kp.BuildKernel(kernelSource, "differentiate")
 	if err != nil {
@@ -437,7 +432,7 @@ func TestDGKernel_Execution_IdentityMatrix(t *testing.T) {
 	// Allocate arrays
 	specs := []builder.ArraySpec{
 		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64},
-		{Name: "V", Size: int64(totalNodes * 8), DataType: builder.Float64},
+		{Name: "V", Size: int64(totalNodes * 8), DataType: builder.Float64, IsOutput: true},
 	}
 	err := kp.AllocateArrays(specs)
 	if err != nil {
@@ -457,11 +452,7 @@ func TestDGKernel_Execution_IdentityMatrix(t *testing.T) {
 #define NP %d
 
 @kernel void applyIdentity(
-	const int_t* K,
-	const real_t* U_global,
-	const int_t* U_offsets,
-	real_t* V_global,
-	const int_t* V_offsets
+	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		const real_t* U = U_PART(part);
@@ -469,7 +460,7 @@ func TestDGKernel_Execution_IdentityMatrix(t *testing.T) {
 		MATMUL_I(U, V, K[part]);
 	}
 }
-`, np)
+`, np, kp.GenerateKernelSignature())
 
 	_, err = kp.BuildKernel(kernelSource, "applyIdentity")
 	if err != nil {
