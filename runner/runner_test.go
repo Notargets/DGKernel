@@ -273,7 +273,7 @@ func TestDGKernel_Execution_BasicKernel(t *testing.T) {
 
 	// Allocate simple array
 	err := kp.AllocateArrays([]builder.ArraySpec{
-		{Name: "data", Size: 10 * 8, DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "data", Size: 10 * 8, DataType: builder.Float64, Alignment: builder.NoAlignment, IsOutput: true},
 	})
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
@@ -282,17 +282,19 @@ func TestDGKernel_Execution_BasicKernel(t *testing.T) {
 	// Simple kernel that sets values
 	kernelSource := `
 @kernel void setValues(
-	const int_t* K,
-	real_t* data_global,
-	const int_t* data_offsets
+    const int_t* K,
+    real_t* data_global,
+    const int_t* data_offsets
 ) {
-	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
-		
-		for (int i = 0; i < K[part]; ++i; @inner) {
-			data[i] = (real_t)i;
-		}
-	}
+    for (int part = 0; part < NPART; ++part; @outer) {
+       real_t* data = data_PART(part);
+       
+       for (int i = 0; i < KpartMax; ++i; @inner) {
+          if (i < K[part]) {
+             data[i] = (real_t)i;
+          }
+       }
+    }
 }`
 
 	kernel, err := kp.BuildKernel(kernelSource, "setValues")
