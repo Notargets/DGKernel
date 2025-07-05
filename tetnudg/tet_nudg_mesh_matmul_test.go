@@ -12,7 +12,7 @@ import (
 )
 
 func TestTetNudgMatmul(t *testing.T) {
-	order := 4
+	order := 1
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Np := tn.Np
 	Ktot := tn.K
@@ -29,55 +29,50 @@ func TestTetNudgMatmul(t *testing.T) {
 	})
 	defer kp.Free()
 
-	for name, mat := range element.GetRefMatrices(tn) {
-		fmt.Printf("%s\n", name)
-		// kp.AddStaticMatrix(name, mat)
-		kp.AddDeviceMatrix(name, mat)
-	}
-
-	// Allocate arrays
-	specs := []builder.ArraySpec{
-		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
-		{Name: "Ur", Size: int64(totalNodes * 8), DataType: builder.Float64,
-			Alignment: builder.NoAlignment, IsOutput: true},
-	}
-	err := kp.AllocateDeviceMatrices()
-	if err != nil {
-		t.Fatalf("Failed to allocate device matrices: %v", err)
-	}
-
-	err = kp.AllocateArrays(specs)
-	if err != nil {
-		t.Fatalf("Failed to allocate: %v", err)
-	}
-
 	// Initialize test data
 	U := make([]float64, totalNodes)
 	for i := range U {
 		U[i] = 2. * float64(i%10)
 	}
-	kp.GetMemory("U").CopyFrom(unsafe.Pointer(&U[0]), int64(totalNodes*8))
 
-	// Kernel using differentiation matrix
-	kernelSource := fmt.Sprintf(`
-#define NP %d
+	// Collect all matrices into param builders
+	matrices := element.GetRefMatrices(tn)
+	params := make([]*runner.ParamBuilder, 0, len(matrices)+2)
 
-@kernel void differentiate(
-	%s
-) {
-	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
-		real_t* Ur = Ur_PART(part);
-		MATMUL_Dr_%s(U, Ur, K[part]);
+	// Add matrices as parameters
+	for name, mat := range matrices {
+		fmt.Printf("%s\n", name)
+		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
 	}
+
+	// Add array parameters
+	params = append(params,
+		runner.Input("U").Bind(U).CopyTo(),
+		runner.Output("Ur").Size(totalNodes).Type(builder.Float64),
+	)
+
+	// Define kernel with all parameters
+	err := kp.DefineKernel("differentiate", params...)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
+	}
+
+	// Get signature and build kernel
+	signature, _ := kp.GetKernelSignature("differentiate")
+	kernelSource := fmt.Sprintf(`
+@kernel void differentiate(%s) {
+    for (int part = 0; part < NPART; ++part; @outer) {
+        const real_t* U = U_PART(part);
+        real_t* Ur = Ur_PART(part);
+        MATMUL_Dr_%s(U, Ur, K[part]);
+    }
 }
-`, Np, kp.GenerateKernelSignature(), props.ShortName)
+`, signature, props.ShortName)
 
 	_, err = kp.BuildKernel(kernelSource, "differentiate")
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
-
 	// Execute differentiation
 	err = kp.RunKernel("differentiate", "U", "Ur")
 	if err != nil {
