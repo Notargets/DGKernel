@@ -2,11 +2,11 @@ package runner
 
 import (
 	"fmt"
+	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
+	"gonum.org/v1/gonum/mat"
 	"strings"
 	"unsafe"
-	"github.com/notargets/DGKernel/runner/builder"
-	"gonum.org/v1/gonum/mat"
 )
 
 // KernelDefinition holds all information about a defined kernel
@@ -32,6 +32,11 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*ParamBuilder) error
 		if err := kr.processParameter(&spec); err != nil {
 			return fmt.Errorf("failed to process parameter %s: %w", spec.Name, err)
 		}
+	}
+
+	// Allocate all device matrices that were added
+	if err := kr.AllocateDeviceMatrices(); err != nil {
+		return fmt.Errorf("failed to allocate device matrices: %w", err)
 	}
 
 	// Store kernel definition
@@ -161,12 +166,8 @@ func (kr *Runner) addDeviceMatrixFromSpec(spec *ParamSpec) error {
 		matrix = mat.NewDense(spec.MatrixRows, spec.MatrixCols, nil)
 	}
 
+	// Add to device matrices collection
 	kr.AddDeviceMatrix(spec.Name, matrix)
-
-	// Allocate device memory
-	if err := kr.allocateDeviceMatrix(spec.Name, matrix); err != nil {
-		return err
-	}
 
 	// Store binding if present
 	if spec.HostBinding != nil {
