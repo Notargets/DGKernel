@@ -366,6 +366,26 @@ func (dg *TetNudgMesh) GetReferenceOperators() element.ReferenceOperators {
 	}
 }
 
+func (df *TetNudgMesh) GetRefMatrices() (refMats map[string]mat.Matrix) {
+	var (
+		props = df.GetProperties()
+	)
+	nm := df.GetNodalModal()
+	ro := df.GetReferenceOperators()
+	sn := props.ShortName
+	refMats = map[string]mat.Matrix{
+		"V_" + sn:    nm.V,
+		"Vinv_" + sn: nm.Vinv,
+		"M_" + sn:    nm.M,
+		"Minv_" + sn: nm.Minv,
+		"Dr_" + sn:   ro.Dr,
+		"Ds_" + sn:   ro.Ds,
+		"Dt_" + sn:   ro.Dt,
+		"LIFT_" + sn: ro.LIFT,
+	}
+	return
+}
+
 // Helper functions for finding min/max of float64 slices
 func minFloat64(s []float64) float64 {
 	if len(s) == 0 {

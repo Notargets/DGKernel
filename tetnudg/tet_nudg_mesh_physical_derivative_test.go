@@ -2,7 +2,6 @@ package tetnudg
 
 import (
 	"fmt"
-	"github.com/notargets/DGKernel/element"
 	"github.com/notargets/DGKernel/runner"
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/DGKernel/utils"
@@ -36,7 +35,7 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	}
 
 	// Collect all matrices into param builders
-	matrices := element.GetRefMatrices(tn)
+	matrices := tn.GetRefMatrices()
 	params := make([]*runner.ParamBuilder, 0, len(matrices)+2)
 
 	// Add matrices as parameters
