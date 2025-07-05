@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
+	"gonum.org/v1/gonum/mat"
 	"unsafe"
 )
 
@@ -20,6 +21,7 @@ type Runner struct {
 type ArrayMetadata struct {
 	spec     builder.ArraySpec
 	dataType builder.DataType
+	isOutput bool
 }
 
 // func NewRunner(device *gocca.OCCADevice, bld *builder.Builder) (kr *Runner) {
@@ -59,41 +61,18 @@ func (kr *Runner) RunKernel(name string, args ...interface{}) error {
 		return fmt.Errorf("kernel %s not found", name)
 	}
 
+	// Validate arguments before expanding
+	if err := kr.ValidateKernelArguments(args); err != nil {
+		return fmt.Errorf("kernel %s argument validation failed: %w", name, err)
+	}
+
 	// Expand args to include renamed arrays
 	expandedArgs := kr.expandKernelArgs(args)
 
 	return kernel.RunWithArgs(expandedArgs...)
 }
 
-// expandKernelArgs transforms user array names to kernel parameter names
-func (kr *Runner) expandKernelArgs(args []interface{}) []interface{} {
-	expanded := []interface{}{}
-
-	// Always pass K array first
-	expanded = append(expanded, kr.PooledMemory["K"])
-
-	// Process remaining arguments
-	for _, arg := range args {
-		switch v := arg.(type) {
-		case string:
-			// Array name - expand to global and offsets
-			globalMem, hasGlobal := kr.PooledMemory[v+"_global"]
-			offsetMem, hasOffset := kr.PooledMemory[v+"_offsets"]
-
-			if hasGlobal && hasOffset {
-				expanded = append(expanded, globalMem, offsetMem)
-			} else {
-				// Pass through if not a recognized array
-				expanded = append(expanded, arg)
-			}
-		default:
-			// Pass through non-string arguments
-			expanded = append(expanded, arg)
-		}
-	}
-
-	return expanded
-}
+// Note: expandKernelArgs is now implemented in kernel_args.go using GetKernelArguments()
 
 // GetMemory returns the device memory handle for an array
 func (kr *Runner) GetMemory(arrayName string) *gocca.OCCAMemory {
@@ -153,6 +132,146 @@ func (kr *Runner) GetIntSize() int {
 		return 4
 	}
 	return 8
+}
+
+// Free releases all resources
+func (kr *Runner) Free() {
+	// Free Kernels
+	for _, kernel := range kr.Kernels {
+		kernel.Free()
+	}
+
+	// Free memory
+	for _, mem := range kr.PooledMemory {
+		mem.Free()
+	}
+}
+
+// AllocateArrays allocates Device memory with automatic offset calculation
+func (kr *Runner) AllocateArrays(specs []builder.ArraySpec) error {
+	for _, spec := range specs {
+		if err := kr.allocateSingleArray(spec); err != nil {
+			return fmt.Errorf("failed to allocate %s: %w", spec.Name, err)
+		}
+	}
+	return nil
+}
+
+// allocateSingleArray handles allocation of a single array
+func (kr *Runner) allocateSingleArray(spec builder.ArraySpec) error {
+	// Calculate aligned offsets and total size
+	offsets, totalSize := kr.CalculateAlignedOffsetsAndSize(spec)
+
+	// Allocate global memory
+	globalMem := kr.Device.Malloc(totalSize, nil, nil)
+	kr.PooledMemory[spec.Name+"_global"] = globalMem
+
+	// Allocate and populate offset array
+	intSize := kr.GetIntSize()
+	offsetsSize := int64(len(offsets) * intSize)
+
+	var offsetMem *gocca.OCCAMemory
+	if intSize == 4 {
+		// Convert to int32 for Device
+		offsets32 := make([]int32, len(offsets))
+		for i, v := range offsets {
+			offsets32[i] = int32(v)
+		}
+		offsetMem = kr.Device.Malloc(offsetsSize, unsafe.Pointer(&offsets32[0]), nil)
+	} else {
+		offsetMem = kr.Device.Malloc(offsetsSize, unsafe.Pointer(&offsets[0]), nil)
+	}
+	kr.PooledMemory[spec.Name+"_offsets"] = offsetMem
+
+	// Track allocation
+	kr.AllocatedArrays = append(kr.AllocatedArrays, spec.Name)
+	kr.arrayMetadata[spec.Name] = ArrayMetadata{
+		spec:     spec,
+		dataType: spec.DataType,
+		isOutput: spec.IsOutput,
+	}
+
+	return nil
+}
+
+// AllocateDeviceMatrices allocates device memory for all device matrices (NEW)
+func (kr *Runner) AllocateDeviceMatrices() error {
+	for name, matrix := range kr.Builder.DeviceMatrices {
+		err := kr.allocateDeviceMatrix(name, matrix)
+		if err != nil {
+			return fmt.Errorf("failed to allocate device matrix %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// allocateDeviceMatrix handles allocation of a single device matrix (NEW)
+func (kr *Runner) allocateDeviceMatrix(name string, matrix mat.Matrix) error {
+	rows, cols := matrix.Dims()
+
+	// Convert matrix to flat array
+	data := make([]float64, rows*cols)
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			data[i*cols+j] = matrix.At(i, j)
+		}
+	}
+
+	// Handle float32 conversion if needed
+	var mem *gocca.OCCAMemory
+	if kr.FloatType == builder.Float32 {
+		data32 := make([]float32, len(data))
+		for i, v := range data {
+			data32[i] = float32(v)
+		}
+		size := int64(len(data32) * 4) // 4 bytes per float32
+		mem = kr.Device.Malloc(size, unsafe.Pointer(&data32[0]), nil)
+	} else {
+		size := int64(len(data) * 8) // 8 bytes per float64
+		mem = kr.Device.Malloc(size, unsafe.Pointer(&data[0]), nil)
+	}
+
+	// Store in pooled memory for automatic cleanup
+	kr.PooledMemory[name] = mem
+
+	return nil
+}
+
+// BuildKernel compiles and registers a kernel with the program
+func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
+	// Generate preamble if not already done
+	if kr.KernelPreamble == "" {
+		kr.GeneratePreamble()
+	}
+
+	// Combine preamble with kernel source
+	fullSource := kr.KernelPreamble + "\n" + kernelSource
+
+	// Build kernel with OpenMP optimization fix
+	var kernel *gocca.OCCAKernel
+	var err error
+
+	if kr.Device.Mode() == "OpenMP" {
+		// Workaround for OCCA bug: OpenMP doesn't get default -O3 flag
+		props := gocca.JsonParse(`{"compiler_flags": "-O3"}`)
+		defer props.Free()
+		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, props)
+	} else {
+		// Other devices work correctly with default flags
+		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, nil)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to build kernel %s: %w", kernelName, err)
+	}
+
+	// Register kernel
+	if kernel != nil {
+		kr.Kernels[kernelName] = kernel
+		return kernel, nil
+	}
+
+	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
 }
 
 // CopyArrayToHost copies array data from device to host, removing alignment padding
@@ -313,100 +432,4 @@ func getDataTypeFromSample[T any](sample T) builder.DataType {
 	default:
 		return 0
 	}
-}
-
-// Free releases all resources
-func (kr *Runner) Free() {
-	// Free Kernels
-	for _, kernel := range kr.Kernels {
-		kernel.Free()
-	}
-
-	// Free memory
-	for _, mem := range kr.PooledMemory {
-		mem.Free()
-	}
-}
-
-// AllocateArrays allocates Device memory with automatic offset calculation
-func (kr *Runner) AllocateArrays(specs []builder.ArraySpec) error {
-	for _, spec := range specs {
-		if err := kr.allocateSingleArray(spec); err != nil {
-			return fmt.Errorf("failed to allocate %s: %w", spec.Name, err)
-		}
-	}
-	return nil
-}
-
-// allocateSingleArray handles allocation of a single array
-func (kr *Runner) allocateSingleArray(spec builder.ArraySpec) error {
-	// Calculate aligned offsets and total size
-	offsets, totalSize := kr.CalculateAlignedOffsetsAndSize(spec)
-
-	// Allocate global memory
-	globalMem := kr.Device.Malloc(totalSize, nil, nil)
-	kr.PooledMemory[spec.Name+"_global"] = globalMem
-
-	// Allocate and populate offset array
-	intSize := kr.GetIntSize()
-	offsetsSize := int64(len(offsets) * intSize)
-
-	var offsetMem *gocca.OCCAMemory
-	if intSize == 4 {
-		// Convert to int32 for Device
-		offsets32 := make([]int32, len(offsets))
-		for i, v := range offsets {
-			offsets32[i] = int32(v)
-		}
-		offsetMem = kr.Device.Malloc(offsetsSize, unsafe.Pointer(&offsets32[0]), nil)
-	} else {
-		offsetMem = kr.Device.Malloc(offsetsSize, unsafe.Pointer(&offsets[0]), nil)
-	}
-	kr.PooledMemory[spec.Name+"_offsets"] = offsetMem
-
-	// Track allocation
-	kr.AllocatedArrays = append(kr.AllocatedArrays, spec.Name)
-	kr.arrayMetadata[spec.Name] = ArrayMetadata{
-		spec:     spec,
-		dataType: spec.DataType,
-	}
-
-	return nil
-}
-
-// BuildKernel compiles and registers a kernel with the program
-func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
-	// Generate preamble if not already done
-	if kr.KernelPreamble == "" {
-		kr.GeneratePreamble()
-	}
-
-	// Combine preamble with kernel source
-	fullSource := kr.KernelPreamble + "\n" + kernelSource
-
-	// Build kernel with OpenMP optimization fix
-	var kernel *gocca.OCCAKernel
-	var err error
-
-	if kr.Device.Mode() == "OpenMP" {
-		// Workaround for OCCA bug: OpenMP doesn't get default -O3 flag
-		props := gocca.JsonParse(`{"compiler_flags": "-O3"}`)
-		defer props.Free()
-		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, props)
-	} else {
-		// Other devices work correctly with default flags
-		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, nil)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to build kernel %s: %w", kernelName, err)
-	}
-
-	// Register kernel
-	if kernel != nil {
-		kr.Kernels[kernelName] = kernel
-		return kernel, nil
-	}
-
-	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
 }

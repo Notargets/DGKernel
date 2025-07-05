@@ -12,8 +12,9 @@ func CreateTestDevice() *gocca.OCCADevice {
 		// Try without quotes around numbers
 		// `{mode: 'OpenCL', platform_id: 0, device_id: 0}`,
 		// Original OpenMP
-		`{"mode": "OpenMP"}`,
+		// `{"mode": "OpenMP", "kernel": {{"compiler_flags": "-O3"}}}`,
 		`{"mode": "CUDA", "device_id": 0}`,
+		`{"mode": "OpenMP"}`,
 		`{"mode": "Serial"}`,
 	}
 

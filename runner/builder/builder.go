@@ -32,6 +32,7 @@ type ArraySpec struct {
 	Size      int64
 	Alignment AlignmentType
 	DataType  DataType
+	IsOutput  bool // NEW: Explicitly declare if this is an output array
 }
 
 // Builder manages code generation and execution for partition-parallel Kernels
@@ -49,6 +50,9 @@ type Builder struct {
 
 	// Static data to embed
 	StaticMatrices map[string]mat.Matrix
+
+	// Device matrices to allocate in global memory (NEW)
+	DeviceMatrices map[string]mat.Matrix
 
 	// Array tracking for macro generation
 	AllocatedArrays []string
@@ -92,6 +96,7 @@ func NewBuilder(cfg Config) *Builder {
 		FloatType:       floatType,
 		IntType:         intType,
 		StaticMatrices:  make(map[string]mat.Matrix),
+		DeviceMatrices:  make(map[string]mat.Matrix), // NEW: Initialize DeviceMatrices
 		AllocatedArrays: []string{},
 	}
 	// Copy K values
@@ -102,6 +107,11 @@ func NewBuilder(cfg Config) *Builder {
 // AddStaticMatrix adds a matrix to be embedded as static const in Kernels
 func (kb *Builder) AddStaticMatrix(name string, m mat.Matrix) {
 	kb.StaticMatrices[name] = m
+}
+
+// AddDeviceMatrix adds a matrix to be allocated in device global memory (NEW)
+func (kb *Builder) AddDeviceMatrix(name string, m mat.Matrix) {
+	kb.DeviceMatrices[name] = m
 }
 
 func (kb *Builder) GetAllocatedArrays() []string {
@@ -225,7 +235,10 @@ func (kb *Builder) generateStaticMatrices() string {
 	if len(kb.StaticMatrices) > 0 {
 		sb.WriteString("// Static matrices\n")
 		for name, matrix := range kb.StaticMatrices {
-			sb.WriteString(kb.formatStaticMatrix(name, matrix))
+			// Only generate if not also in DeviceMatrices (MODIFIED)
+			if _, isDevice := kb.DeviceMatrices[name]; !isDevice {
+				sb.WriteString(kb.formatStaticMatrix(name, matrix))
+			}
 		}
 		sb.WriteString("\n")
 	}
@@ -287,48 +300,113 @@ func (kb *Builder) generatePartitionMacros() string {
 	return sb.String()
 }
 
-// generateMatrixMacros creates matrix multiplication macros with @inner loop
+// generateMatrixMacros creates matrix multiplication macros with @inner loop (MODIFIED)
 func (kb *Builder) generateMatrixMacros() string {
 	var sb strings.Builder
 
 	sb.WriteString("// Matrix multiplication macros\n")
 	sb.WriteString("// Automatically infer strides from matrix dimensions\n\n")
 
+	// Generate static matrix macros (existing logic)
 	for name, matrix := range kb.StaticMatrices {
-		rows, cols := matrix.Dims()
+		sb.WriteString(kb.generateStaticMatrixMacro(name, matrix))
+	}
 
-		// Standard multiply: OUT = Matrix × IN
-		sb.WriteString(fmt.Sprintf("#define MATMUL_%s(IN, OUT, K_VAL) \\\n", name))
-		sb.WriteString("    do { \\\n")
-		sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
-		sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
-		sb.WriteString("                if (elem < (K_VAL)) { \\\n")
-		sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
-		sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
-		sb.WriteString(fmt.Sprintf("                        sum += %s[i][j] * (IN)[elem * %d + j]; \\\n", name, cols))
-		sb.WriteString("                    } \\\n")
-		sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] = sum; \\\n", rows))
-		sb.WriteString("                } \\\n")
-		sb.WriteString("            } \\\n")
-		sb.WriteString("        } \\\n")
-		sb.WriteString("    } while(0)\n\n")
-
-		// Accumulating multiply: OUT += Matrix × IN
-		sb.WriteString(fmt.Sprintf("#define MATMUL_ADD_%s(IN, OUT, K_VAL) \\\n", name))
-		sb.WriteString("    do { \\\n")
-		sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
-		sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
-		sb.WriteString("                if (elem < (K_VAL)) { \\\n")
-		sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
-		sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
-		sb.WriteString(fmt.Sprintf("                        sum += %s[i][j] * (IN)[elem * %d + j]; \\\n", name, cols))
-		sb.WriteString("                    } \\\n")
-		sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] += sum; \\\n", rows))
-		sb.WriteString("                } \\\n")
-		sb.WriteString("            } \\\n")
-		sb.WriteString("        } \\\n")
-		sb.WriteString("    } while(0)\n\n")
+	// Generate device matrix macros (NEW logic)
+	for name, matrix := range kb.DeviceMatrices {
+		sb.WriteString(kb.generateDeviceMatrixMacro(name, matrix))
 	}
 
 	return sb.String()
 }
+
+// generateStaticMatrixMacro generates macro for static matrix (NEW - extracted method)
+func (kb *Builder) generateStaticMatrixMacro(name string, matrix mat.Matrix) string {
+	rows, cols := matrix.Dims()
+	var sb strings.Builder
+
+	// Standard multiply: OUT = Matrix × IN
+	sb.WriteString(fmt.Sprintf("#define MATMUL_%s(IN, OUT, K_VAL) \\\n", name))
+	sb.WriteString("    do { \\\n")
+	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
+	sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
+	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
+	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
+	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
+	sb.WriteString(fmt.Sprintf("                        sum += %s[i][j] * (IN)[elem * %d + j]; \\\n", name, cols))
+	sb.WriteString("                    } \\\n")
+	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] = sum; \\\n", rows))
+	sb.WriteString("                } \\\n")
+	sb.WriteString("            } \\\n")
+	sb.WriteString("        } \\\n")
+	sb.WriteString("    } while(0)\n\n")
+
+	// Accumulating multiply: OUT += Matrix × IN
+	sb.WriteString(fmt.Sprintf("#define MATMUL_ADD_%s(IN, OUT, K_VAL) \\\n", name))
+	sb.WriteString("    do { \\\n")
+	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
+	sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
+	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
+	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
+	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
+	sb.WriteString(fmt.Sprintf("                        sum += %s[i][j] * (IN)[elem * %d + j]; \\\n", name, cols))
+	sb.WriteString("                    } \\\n")
+	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] += sum; \\\n", rows))
+	sb.WriteString("                } \\\n")
+	sb.WriteString("            } \\\n")
+	sb.WriteString("        } \\\n")
+	sb.WriteString("    } while(0)\n\n")
+
+	return sb.String()
+}
+
+// generateDeviceMatrixMacro generates macro for device matrix with pointer parameter (NEW)
+func (kb *Builder) generateDeviceMatrixMacro(name string, matrix mat.Matrix) string {
+	rows, cols := matrix.Dims()
+	var sb strings.Builder
+
+	// Device matrix macro references the matrix pointer by name directly
+	// Same 3-argument interface as static matrices for compatibility
+	sb.WriteString(fmt.Sprintf("#define MATMUL_%s(IN, OUT, K_VAL) \\\n", name))
+	sb.WriteString("    do { \\\n")
+	sb.WriteString("        for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
+	sb.WriteString("            if (elem < (K_VAL)) { \\\n")
+	sb.WriteString(fmt.Sprintf("                for (int i = 0; i < %d; ++i) { \\\n", rows))
+	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
+	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
+	sb.WriteString(fmt.Sprintf("                        sum += %s[i * %d + j] * (IN)[elem * %d + j]; \\\n", name, cols, cols))
+	sb.WriteString("                    } \\\n")
+	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] = sum; \\\n", rows))
+	sb.WriteString("                } \\\n")
+	sb.WriteString("            } \\\n")
+	sb.WriteString("        } \\\n")
+	sb.WriteString("    } while(0)\n\n")
+
+	// Also generate the accumulating version
+	sb.WriteString(fmt.Sprintf("#define MATMUL_ADD_%s(IN, OUT, K_VAL) \\\n", name))
+	sb.WriteString("    do { \\\n")
+	sb.WriteString("        for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
+	sb.WriteString("            if (elem < (K_VAL)) { \\\n")
+	sb.WriteString(fmt.Sprintf("                for (int i = 0; i < %d; ++i) { \\\n", rows))
+	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
+	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
+	sb.WriteString(fmt.Sprintf("                        sum += %s[i * %d + j] * (IN)[elem * %d + j]; \\\n", name, cols, cols))
+	sb.WriteString("                    } \\\n")
+	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] += sum; \\\n", rows))
+	sb.WriteString("                } \\\n")
+	sb.WriteString("            } \\\n")
+	sb.WriteString("        } \\\n")
+	sb.WriteString("    } while(0)\n\n")
+
+	return sb.String()
+}
+
+// GetIntSize returns the size of the integer type in bytes
+func (kb *Builder) GetIntSize() int {
+	if kb.IntType == INT32 {
+		return 4
+	}
+	return 8
+}
+
+// Note: GenerateKernelSignature is now implemented in the runner package using GetKernelArguments()
