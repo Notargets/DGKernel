@@ -29,7 +29,8 @@ func TestTetNudgMatmul(t *testing.T) {
 
 	for name, mat := range element.GetRefMatrices(tn) {
 		fmt.Printf("%s\n", name)
-		kp.AddStaticMatrix(name, mat)
+		// kp.AddStaticMatrix(name, mat)
+		kp.AddDeviceMatrix(name, mat)
 	}
 
 	// Allocate arrays
@@ -38,7 +39,12 @@ func TestTetNudgMatmul(t *testing.T) {
 		{Name: "Ur", Size: int64(totalNodes * 8), DataType: builder.Float64,
 			Alignment: builder.NoAlignment, IsOutput: true},
 	}
-	err := kp.AllocateArrays(specs)
+	err := kp.AllocateDeviceMatrices()
+	if err != nil {
+		t.Fatalf("Failed to allocate device matrices: %v", err)
+	}
+
+	err = kp.AllocateArrays(specs)
 	if err != nil {
 		t.Fatalf("Failed to allocate: %v", err)
 	}
