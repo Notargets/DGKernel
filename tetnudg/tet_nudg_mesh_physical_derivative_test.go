@@ -9,7 +9,7 @@ import (
 )
 
 func TestTetNudgPhysicalDerivative(t *testing.T) {
-	order := 1
+	order := 4
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Np := tn.Np
 	Ktot := tn.K
@@ -37,12 +37,22 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	}
 
 	Dx := make([]float64, totalNodes)
+	Dy := make([]float64, totalNodes)
+	Dz := make([]float64, totalNodes)
 	// Add array parameters
 	params = append(params,
 		runner.Input("Rx").Bind(tn.Rx.RawMatrix().Data).CopyTo(),
-		runner.Input("Sx").Bind(tn.Rx.RawMatrix().Data).CopyTo(),
-		runner.Input("Tx").Bind(tn.Rx.RawMatrix().Data).CopyTo(),
+		runner.Input("Sx").Bind(tn.Sx.RawMatrix().Data).CopyTo(),
+		runner.Input("Tx").Bind(tn.Tx.RawMatrix().Data).CopyTo(),
+		runner.Input("Ry").Bind(tn.Ry.RawMatrix().Data).CopyTo(),
+		runner.Input("Sy").Bind(tn.Sy.RawMatrix().Data).CopyTo(),
+		runner.Input("Ty").Bind(tn.Ty.RawMatrix().Data).CopyTo(),
+		runner.Input("Rz").Bind(tn.Rz.RawMatrix().Data).CopyTo(),
+		runner.Input("Sz").Bind(tn.Sz.RawMatrix().Data).CopyTo(),
+		runner.Input("Tz").Bind(tn.Tz.RawMatrix().Data).CopyTo(),
 		runner.Output("Dx").Bind(Dx).CopyBack(),
+		runner.Output("Dy").Bind(Dy).CopyBack(),
+		runner.Output("Dz").Bind(Dz).CopyBack(),
 	)
 
 	// Define kernel with all parameters
@@ -63,9 +73,28 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
         MATMUL_Dr_%s(Rx, Dx, K[part]);
         MATMUL_ADD_Ds_%s(Sx, Dx, K[part]);
         MATMUL_ADD_Dt_%s(Tx, Dx, K[part]);
+
+        real_t* Dy = Dy_PART(part);
+        const real_t* Ry = Ry_PART(part);
+        const real_t* Sy = Sy_PART(part);
+        const real_t* Ty = Ty_PART(part);
+        MATMUL_Dr_%s(Ry, Dy, K[part]);
+        MATMUL_ADD_Ds_%s(Sy, Dy, K[part]);
+        MATMUL_ADD_Dt_%s(Ty, Dy, K[part]);
+
+        real_t* Dz = Dz_PART(part);
+        const real_t* Rz = Rz_PART(part);
+        const real_t* Sz = Sz_PART(part);
+        const real_t* Tz = Tz_PART(part);
+        MATMUL_Dr_%s(Rz, Dz, K[part]);
+        MATMUL_ADD_Ds_%s(Sz, Dz, K[part]);
+        MATMUL_ADD_Dt_%s(Tz, Dz, K[part]);
     }
 }
-`, signature, props.ShortName, props.ShortName, props.ShortName)
+`, signature,
+		props.ShortName, props.ShortName, props.ShortName,
+		props.ShortName, props.ShortName, props.ShortName,
+		props.ShortName, props.ShortName, props.ShortName)
 
 	_, err = kp.BuildKernel(kernelSource, "differentiate")
 	if err != nil {
@@ -76,5 +105,7 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
-	// fmt.Println(Dx)
+	fmt.Println(Dx[:10])
+	fmt.Println(Dy[:10])
+	fmt.Println(Dz[:10])
 }
