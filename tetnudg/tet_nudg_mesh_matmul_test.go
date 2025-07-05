@@ -7,7 +7,6 @@ import (
 	"github.com/notargets/DGKernel/utils"
 	"github.com/stretchr/testify/assert"
 	"testing"
-	"unsafe"
 )
 
 func TestTetNudgMatmul(t *testing.T) {
@@ -29,6 +28,7 @@ func TestTetNudgMatmul(t *testing.T) {
 	defer kp.Free()
 
 	// Initialize test data
+	Ur := make([]float64, totalNodes)
 	U := make([]float64, totalNodes)
 	for i := range U {
 		U[i] = 2. * float64(i%10)
@@ -47,7 +47,7 @@ func TestTetNudgMatmul(t *testing.T) {
 	// Add array parameters
 	params = append(params,
 		runner.Input("U").Bind(U).CopyTo(),
-		runner.Output("Ur").Size(totalNodes).Type(builder.Float64),
+		runner.Output("Ur").Bind(Ur).CopyBack(),
 	)
 
 	// Define kernel with all parameters
@@ -73,14 +73,10 @@ func TestTetNudgMatmul(t *testing.T) {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 	// Execute differentiation
-	err = kp.RunKernel("differentiate", "U", "Ur")
+	err = kp.RunKernel("differentiate")
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
-
-	// Verify results make sense (not checking exact values, just sanity)
-	result := make([]float64, totalNodes)
-	kp.GetMemory("Ur").CopyTo(unsafe.Pointer(&result[0]), int64(totalNodes*8))
 
 	expected := make([]float64, totalNodes)
 	for i := range expected {
@@ -88,6 +84,6 @@ func TestTetNudgMatmul(t *testing.T) {
 	}
 
 	if order == 1 {
-		assert.InDeltaSlicef(t, expected, result, 1.e-8, "")
+		assert.InDeltaSlicef(t, expected, Ur, 1.e-8, "")
 	}
 }
