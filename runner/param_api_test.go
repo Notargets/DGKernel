@@ -154,7 +154,7 @@ func TestParameterAPI_MatrixSupport(t *testing.T) {
 		
 		// Static matrix Dr is embedded, device matrix Mass is passed as parameter
 		MATMUL_Dr(U, Ur, K[part]);
-		MATMUL_Mass(U, Ur, K[part]); // Device matrix needs pointer
+		MATMUL_Mass(U, Ur, K[part]);
 	}
 }`, signature)
 
