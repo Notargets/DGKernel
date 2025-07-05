@@ -62,7 +62,7 @@ func benchmarkMatrixOps(b *testing.B, k []int, np int) {
 	// Define kernel with new API - much simpler!
 	err := kp.DefineKernel("matmul",
 		Input("Dr").Bind(Dr).ToMatrix().Static(),
-		Input("U").Bind(hostU).CopyTo(),  // Only copy once at start
+		InOut("U").Bind(hostU).CopyTo(),  // Only copy once at start
 		Output("V").Bind(hostV).NoCopy(), // Keep on device
 		Output("W").Bind(hostW).NoCopy(), // Keep on device
 	)
@@ -80,7 +80,7 @@ func benchmarkMatrixOps(b *testing.B, k []int, np int) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
+		real_t* U = U_PART(part);
 		real_t* V = V_PART(part);
 		real_t* W = W_PART(part);
 		
@@ -251,6 +251,22 @@ func BenchmarkRunner_MemoryPatterns(b *testing.B) {
 			kp.RunKernel("with_temp")
 		}
 	})
+}
+
+func BenchmarkRunner_MemoryPatterns2(b *testing.B) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	np := 20
+	k := []int{100, 100, 100, 100} // 4 partitions
+
+	kp := NewRunner(device, builder.Config{
+		K:         k,
+		FloatType: builder.Float64,
+	})
+	defer kp.Free()
+
+	totalNodes := 400 * np
 
 	b.Run("InOut_Pattern", func(b *testing.B) {
 		hostData := make([]float64, totalNodes)

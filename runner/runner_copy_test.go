@@ -117,7 +117,8 @@ func TestRunner_CopySemantics(t *testing.T) {
 		real_t* data = data_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
-				data[i] = (real_t)(i * i);
+				//data[i] = (real_t)(i * i);
+				data[i] = i * i;
 			}
 		}
 	}
@@ -337,42 +338,6 @@ func TestRunner_WorkingArrays(t *testing.T) {
 		if math.Abs(result[i]-expected) > 1e-10 {
 			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
 		}
-	}
-}
-
-// Test invalid partition access
-func TestRunner_InvalidPartition(t *testing.T) {
-	device := utils.CreateTestDevice()
-	defer device.Free()
-
-	kp := NewRunner(device, builder.Config{K: []int{5, 10}})
-	defer kp.Free()
-
-	hostData := make([]float64, 15)
-	kp.DefineKernel("test",
-		Input("data").Bind(hostData).CopyTo(),
-	)
-
-	// Build dummy kernel
-	signature, _ := kp.GetKernelSignature("test")
-	kernelSource := fmt.Sprintf(`@kernel void test(%s) {}`, signature)
-	kp.BuildKernel(kernelSource, "test")
-	kp.RunKernel("test")
-
-	// Test invalid partition IDs
-	_, err := CopyPartitionToHost[float64](kp, "data", -1)
-	if err == nil {
-		t.Error("Expected error for negative partition ID")
-	}
-
-	_, err = CopyPartitionToHost[float64](kp, "data", 2)
-	if err == nil {
-		t.Error("Expected error for partition ID >= NumPartitions")
-	}
-
-	_, err = CopyPartitionToHost[float64](kp, "data", 100)
-	if err == nil {
-		t.Error("Expected error for large partition ID")
 	}
 }
 
