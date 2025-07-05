@@ -57,9 +57,6 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	}
 	kp.GetMemory("U").CopyFrom(unsafe.Pointer(&U[0]), int64(totalNodes*8))
 
-	signature := kp.GenerateKernelSignature()
-	fmt.Printf("Signature: %v\n", signature)
-
 	// Kernel using differentiation matrix
 	kernelSource := fmt.Sprintf(`
 #define NP %d
@@ -73,7 +70,7 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
        MATMUL_Dr_%s(U, Ur, K[part]);
     }
 }
-`, Np, signature, props.ShortName)
+`, Np, kp.GenerateKernelSignature(), props.ShortName)
 
 	_, err = kp.BuildKernel(kernelSource, "differentiate")
 	if err != nil {

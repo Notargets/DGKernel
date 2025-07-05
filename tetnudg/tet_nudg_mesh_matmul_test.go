@@ -35,7 +35,8 @@ func TestTetNudgMatmul(t *testing.T) {
 	// Allocate arrays
 	specs := []builder.ArraySpec{
 		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
-		{Name: "Ur", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
+		{Name: "Ur", Size: int64(totalNodes * 8), DataType: builder.Float64,
+			Alignment: builder.NoAlignment, IsOutput: true},
 	}
 	err := kp.AllocateArrays(specs)
 	if err != nil {
@@ -54,11 +55,7 @@ func TestTetNudgMatmul(t *testing.T) {
 #define NP %d
 
 @kernel void differentiate(
-	const int_t* K,
-	const real_t* U_global,
-	const int_t* U_offsets,
-	real_t* Ur_global,
-	const int_t* Ur_offsets
+	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		const real_t* U = U_PART(part);
@@ -66,7 +63,7 @@ func TestTetNudgMatmul(t *testing.T) {
 		MATMUL_Dr_NudgTet1(U, Ur, K[part]);
 	}
 }
-`, Np)
+`, Np, kp.GenerateKernelSignature())
 
 	_, err = kp.BuildKernel(kernelSource, "differentiate")
 	if err != nil {
