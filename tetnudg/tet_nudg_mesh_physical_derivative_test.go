@@ -11,7 +11,7 @@ import (
 )
 
 func TestTetNudgPhysicalDerivative(t *testing.T) {
-	order := 4
+	order := 6
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Np := tn.Np
 	Ktot := tn.K
