@@ -15,6 +15,10 @@ type Runner struct {
 	Device       *gocca.OCCADevice
 	Kernels      map[string]*gocca.OCCAKernel
 	PooledMemory map[string]*gocca.OCCAMemory
+
+	// New fields for parameter API
+	kernelDefinitions map[string]*KernelDefinition
+	hostBindings      map[string]interface{}
 }
 
 // ArrayMetadata tracks information about allocated arrays
@@ -56,6 +60,12 @@ func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
 
 // RunKernel executes a registered kernel with the given arguments
 func (kr *Runner) RunKernel(name string, args ...interface{}) error {
+	// Check if this kernel was defined with the new API
+	if _, exists := kr.kernelDefinitions[name]; exists {
+		return kr.RunKernelEnhanced(name, args...)
+	}
+
+	// Original implementation for backward compatibility
 	kernel, exists := kr.Kernels[name]
 	if !exists {
 		return fmt.Errorf("kernel %s not found", name)
