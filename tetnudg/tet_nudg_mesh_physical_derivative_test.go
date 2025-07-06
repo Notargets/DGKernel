@@ -35,7 +35,6 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 
 	// Add matrices as parameters
 	for name, mat := range matrices {
-		fmt.Printf("%s\n", name)
 		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
 	}
 
@@ -112,15 +111,11 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
         const real_t* Rz = Rz_PART(part);
         const real_t* Sz = Sz_PART(part);
         const real_t* Tz = Tz_PART(part);
-		for (int elem = 0; elem < KpartMax; ++elem; @inner) {
-            if (elem < K[part]) {
-				for (int i = 0; i < NP; ++i) {
-					int ii = i + NP*elem;
-					Dx[ii] = Rx[ii]*Ur[ii] + Sx[ii]*Us[ii] + Tx[ii]*Ut[ii];
-					Dy[ii] = Ry[ii]*Ur[ii] + Sy[ii]*Us[ii] + Ty[ii]*Ut[ii];
-					Dz[ii] = Rz[ii]*Ur[ii] + Sz[ii]*Us[ii] + Tz[ii]*Ut[ii];
-				}
-			}
+		// Single partition means we can safely use KpartMax as K[part]
+		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
+			Dx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
+			Dy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
+			Dz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
 		}
     }
 }
@@ -145,12 +140,9 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	assert.InDeltaSlicef(t, UxExpected, DxH, 1.e-8, "")
 	assert.InDeltaSlicef(t, UyExpected, DyH, 1.e-8, "")
 	assert.InDeltaSlicef(t, UzExpected, DzH, 1.e-8, "")
-	fmt.Println(Dx[:10])
-	fmt.Println(DxH[:10])
-	fmt.Println(Dy[:10])
-	fmt.Println(DyH[:10])
-	fmt.Println(Dz[:10])
-	fmt.Println(DzH[:10])
+	fmt.Println("Host calculation of physical derivative validates")
+
+	assert.InDeltaSlicef(t, UxExpected, Dx, 1.e-8, "")
 }
 
 func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
@@ -170,9 +162,9 @@ func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
 		rx, ry, rz := RxM.RawMatrix().Data[i], RyM.RawMatrix().Data[i], RzM.RawMatrix().Data[i]
 		sx, sy, sz := SxM.RawMatrix().Data[i], SyM.RawMatrix().Data[i], SzM.RawMatrix().Data[i]
 		tx, ty, tz := TxM.RawMatrix().Data[i], TyM.RawMatrix().Data[i], TzM.RawMatrix().Data[i]
-		Dx[i] = ur*rx + us*sx + ut*tx
-		Dy[i] = ur*ry + us*sy + ut*ty
-		Dz[i] = ur*rz + us*sz + ut*tz
+		Dx[i] = rx*ur + sx*us + tx*ut
+		Dy[i] = ry*ur + sy*us + ty*ut
+		Dz[i] = rz*ur + sz*us + tz*ut
 	}
 	return
 }
