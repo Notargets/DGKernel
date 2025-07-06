@@ -12,6 +12,18 @@ import (
 )
 
 func TestTetNudgPhysicalDerivative(t *testing.T) {
+	// TODO: The issue this test has surfaced is that golang is ROW-MAJOR
+	//  storage of matrices, where all numerical libraries are COLUMN-MAJOR
+	//  We need to implement COLUMN-MAJOR in the DGKernel code because the
+	//  partitions need to be stored contiguously for us to slice them.
+	//  We will need to automatically transpose matrices when copying from
+	//  the host to device to implement the required COLUMN-MAJOR format.
+	//  We'll keep arrays unchanged,
+	//  and make notes so that a user will need to implement COLUMN-MAJOR
+	//  when flattening matrices into slices on the host before tranferring
+	//  to the device. This will perform optimally on host,
+	//  and allow for natural zero copy manipulation of partitions for
+	//  parallelism.
 	order := 1
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Np := tn.Np
