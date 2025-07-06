@@ -5,11 +5,13 @@ import (
 	"github.com/notargets/DGKernel/runner"
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/DGKernel/utils"
+	"github.com/stretchr/testify/assert"
+	"math"
 	"testing"
 )
 
 func TestTetNudgPhysicalDerivative(t *testing.T) {
-	order := 4
+	order := 1
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Np := tn.Np
 	Ktot := tn.K
@@ -36,11 +38,29 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
 	}
 
+	U := make([]float64, totalNodes)
+	UxExpected := make([]float64, totalNodes)
+	UyExpected := make([]float64, totalNodes)
+	UzExpected := make([]float64, totalNodes)
+	fOrder := float64(order)
+	for i := 0; i < totalNodes; i++ {
+		x, y, z := tn.X.RawMatrix().Data[i], tn.Y.RawMatrix().Data[i], tn.Z.RawMatrix().Data[i]
+		xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
+		dxP := float64(fOrder) * math.Pow(x, fOrder-1)
+		dyP := float64(fOrder) * math.Pow(y, fOrder-1)
+		dzP := float64(fOrder) * math.Pow(z, fOrder-1)
+		U[i] = xP + yP + zP
+		UxExpected[i] = dxP
+		UyExpected[i] = dyP
+		UzExpected[i] = dzP
+	}
+
 	Dx := make([]float64, totalNodes)
 	Dy := make([]float64, totalNodes)
 	Dz := make([]float64, totalNodes)
 	// Add array parameters
 	params = append(params,
+		runner.Input("U").Bind(U).CopyTo(),
 		runner.Input("Rx").Bind(tn.Rx.RawMatrix().Data).CopyTo(),
 		runner.Input("Sx").Bind(tn.Sx.RawMatrix().Data).CopyTo(),
 		runner.Input("Tx").Bind(tn.Tx.RawMatrix().Data).CopyTo(),
@@ -53,6 +73,9 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		runner.Output("Dx").Bind(Dx).CopyBack(),
 		runner.Output("Dy").Bind(Dy).CopyBack(),
 		runner.Output("Dz").Bind(Dz).CopyBack(),
+		runner.Temp("Ur").Type(builder.Float64).Size(totalNodes),
+		runner.Temp("Us").Type(builder.Float64).Size(totalNodes),
+		runner.Temp("Ut").Type(builder.Float64).Size(totalNodes),
 	)
 
 	// Define kernel with all parameters
@@ -64,36 +87,43 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	// Get signature and build kernel
 	signature, _ := kp.GetKernelSignature("differentiate")
 	kernelSource := fmt.Sprintf(`
+#define NP %d
+
 @kernel void differentiate(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
+        const real_t* U = U_PART(part);
+        real_t* Ur = Ur_PART(part);
+        real_t* Us = Us_PART(part);
+        real_t* Ut = Ut_PART(part);
+        MATMUL_Dr_%s(U, Ur, K[part]);
+        MATMUL_Ds_%s(U, Us, K[part]);
+        MATMUL_Dt_%s(U, Ut, K[part]);
+
         real_t* Dx = Dx_PART(part);
+        real_t* Dy = Dy_PART(part);
+        real_t* Dz = Dz_PART(part);
         const real_t* Rx = Rx_PART(part);
         const real_t* Sx = Sx_PART(part);
         const real_t* Tx = Tx_PART(part);
-        MATMUL_Dr_%s(Rx, Dx, K[part]);
-        MATMUL_ADD_Ds_%s(Sx, Dx, K[part]);
-        MATMUL_ADD_Dt_%s(Tx, Dx, K[part]);
-
-        real_t* Dy = Dy_PART(part);
         const real_t* Ry = Ry_PART(part);
         const real_t* Sy = Sy_PART(part);
         const real_t* Ty = Ty_PART(part);
-        MATMUL_Dr_%s(Ry, Dy, K[part]);
-        MATMUL_ADD_Ds_%s(Sy, Dy, K[part]);
-        MATMUL_ADD_Dt_%s(Ty, Dy, K[part]);
-
-        real_t* Dz = Dz_PART(part);
         const real_t* Rz = Rz_PART(part);
         const real_t* Sz = Sz_PART(part);
         const real_t* Tz = Tz_PART(part);
-        MATMUL_Dr_%s(Rz, Dz, K[part]);
-        MATMUL_ADD_Ds_%s(Sz, Dz, K[part]);
-        MATMUL_ADD_Dt_%s(Tz, Dz, K[part]);
+		for (int elem = 0; elem < KpartMax; ++elem; @inner) {
+            if (elem < K[part]) {
+				for (int i = 0; i < NP; ++i) {
+					int ii = i + NP*elem;
+					Dx[ii] = Rx[ii]*Ur[ii] + Sx[ii]*Us[ii] + Tx[ii]*Ut[ii];
+					Dy[ii] = Ry[ii]*Ur[ii] + Sy[ii]*Us[ii] + Ty[ii]*Ut[ii];
+					Dz[ii] = Rz[ii]*Ur[ii] + Sz[ii]*Us[ii] + Tz[ii]*Ut[ii];
+				}
+			}
+		}
     }
 }
-`, signature,
-		props.ShortName, props.ShortName, props.ShortName,
-		props.ShortName, props.ShortName, props.ShortName,
+`, tn.Np, signature,
 		props.ShortName, props.ShortName, props.ShortName)
 
 	_, err = kp.BuildKernel(kernelSource, "differentiate")
@@ -105,6 +135,9 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
+	assert.InDeltaSlicef(t, UxExpected, Dx, 1.e-8, "")
+	assert.InDeltaSlicef(t, UyExpected, Dy, 1.e-8, "")
+	assert.InDeltaSlicef(t, UzExpected, Dz, 1.e-8, "")
 	fmt.Println(Dx[:10])
 	fmt.Println(Dy[:10])
 	fmt.Println(Dz[:10])
