@@ -6,6 +6,7 @@ import (
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/DGKernel/utils"
 	"github.com/stretchr/testify/assert"
+	"gonum.org/v1/gonum/mat"
 	"math"
 	"testing"
 )
@@ -135,10 +136,43 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
-	assert.InDeltaSlicef(t, UxExpected, Dx, 1.e-8, "")
-	assert.InDeltaSlicef(t, UyExpected, Dy, 1.e-8, "")
-	assert.InDeltaSlicef(t, UzExpected, Dz, 1.e-8, "")
+
+	UM := mat.NewDense(tn.Np, tn.K, U)
+	DxH, DyH, DzH := calcPhysicalDerivative(UM, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
+		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
+
+	_, _, _ = DxH, DyH, DzH
+	assert.InDeltaSlicef(t, UxExpected, DxH, 1.e-8, "")
+	assert.InDeltaSlicef(t, UyExpected, DyH, 1.e-8, "")
+	assert.InDeltaSlicef(t, UzExpected, DzH, 1.e-8, "")
 	fmt.Println(Dx[:10])
+	fmt.Println(DxH[:10])
 	fmt.Println(Dy[:10])
+	fmt.Println(DyH[:10])
 	fmt.Println(Dz[:10])
+	fmt.Println(DzH[:10])
+}
+
+func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
+	TzM, DrM, DsM, DtM *mat.Dense) (Dx, Dy, Dz []float64) {
+	var (
+		Np, K      = UM.Dims()
+		Ur, Us, Ut mat.Dense
+	)
+	Ur.Mul(DrM, UM)
+	Us.Mul(DsM, UM)
+	Ut.Mul(DtM, UM)
+	Dx = make([]float64, Np*K)
+	Dy = make([]float64, Np*K)
+	Dz = make([]float64, Np*K)
+	for i, ur := range Ur.RawMatrix().Data {
+		us, ut := Us.RawMatrix().Data[i], Ut.RawMatrix().Data[i]
+		rx, ry, rz := RxM.RawMatrix().Data[i], RyM.RawMatrix().Data[i], RzM.RawMatrix().Data[i]
+		sx, sy, sz := SxM.RawMatrix().Data[i], SyM.RawMatrix().Data[i], SzM.RawMatrix().Data[i]
+		tx, ty, tz := TxM.RawMatrix().Data[i], TyM.RawMatrix().Data[i], TzM.RawMatrix().Data[i]
+		Dx[i] = ur*rx + us*sx + ut*tx
+		Dy[i] = ur*ry + us*sy + ut*ty
+		Dz[i] = ur*rz + us*sz + ut*tz
+	}
+	return
 }
