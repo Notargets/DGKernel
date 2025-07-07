@@ -215,15 +215,28 @@ func (kr *Runner) AllocateDeviceMatrices() error {
 	return nil
 }
 
-// allocateDeviceMatrix handles allocation of a single device matrix (NEW)
+// allocateDeviceMatrix handles allocation of a single device matrix
+// IMPORTANT: This function transposes matrices during copy to convert from
+// Go's row-major format to the column-major format expected by numerical
+// libraries and GPU kernels.
 func (kr *Runner) allocateDeviceMatrix(name string, matrix mat.Matrix) error {
 	rows, cols := matrix.Dims()
 
-	// Convert matrix to flat array
+	// COLUMN-MAJOR STORAGE: Device matrices are stored in column-major format
+	// for compatibility with numerical libraries (BLAS, LAPACK) and GPU kernels.
+	//
+	// Go's mat.Matrix uses row-major storage: element (i,j) is at index [i*cols + j]
+	// Column-major storage: element (i,j) is at index [j*rows + i]
+	//
+	// This transpose happens automatically during copy. Users providing flattened
+	// matrices must ensure they use column-major ordering.
+
+	// Convert matrix to column-major flat array
 	data := make([]float64, rows*cols)
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
-			data[i*cols+j] = matrix.At(i, j)
+			// Transpose during copy: write to column-major position
+			data[j*rows+i] = matrix.At(i, j)
 		}
 	}
 

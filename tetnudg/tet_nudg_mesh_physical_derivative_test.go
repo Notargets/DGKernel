@@ -50,21 +50,23 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
 	}
 
-	U := make([]float64, totalNodes)
-	UxExpected := make([]float64, totalNodes)
-	UyExpected := make([]float64, totalNodes)
-	UzExpected := make([]float64, totalNodes)
+	U := mat.NewDense(Np, Ktot, nil)
+	UxExpected := mat.NewDense(Np, Ktot, nil)
+	UyExpected := mat.NewDense(Np, Ktot, nil)
+	UzExpected := mat.NewDense(Np, Ktot, nil)
 	fOrder := float64(order)
-	for i := 0; i < totalNodes; i++ {
-		x, y, z := tn.X.RawMatrix().Data[i], tn.Y.RawMatrix().Data[i], tn.Z.RawMatrix().Data[i]
-		xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
-		dxP := float64(fOrder) * math.Pow(x, fOrder-1)
-		dyP := float64(fOrder) * math.Pow(y, fOrder-1)
-		dzP := float64(fOrder) * math.Pow(z, fOrder-1)
-		U[i] = xP + yP + zP
-		UxExpected[i] = dxP
-		UyExpected[i] = dyP
-		UzExpected[i] = dzP
+	for K := 0; K < Ktot; K++ {
+		for j := 0; j < Np; j++ {
+			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
+			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
+			dxP := float64(fOrder) * math.Pow(x, fOrder-1)
+			dyP := float64(fOrder) * math.Pow(y, fOrder-1)
+			dzP := float64(fOrder) * math.Pow(z, fOrder-1)
+			U.Set(j, K, xP+yP+zP)
+			UxExpected.Set(j, K, dxP)
+			UyExpected.Set(j, K, dyP)
+			UzExpected.Set(j, K, dzP)
+		}
 	}
 
 	Dx := make([]float64, totalNodes)
@@ -72,16 +74,16 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	Dz := make([]float64, totalNodes)
 	// Add array parameters
 	params = append(params,
-		runner.Input("U").Bind(U).CopyTo(),
-		runner.Input("Rx").Bind(tn.Rx.RawMatrix().Data).CopyTo(),
-		runner.Input("Sx").Bind(tn.Sx.RawMatrix().Data).CopyTo(),
-		runner.Input("Tx").Bind(tn.Tx.RawMatrix().Data).CopyTo(),
-		runner.Input("Ry").Bind(tn.Ry.RawMatrix().Data).CopyTo(),
-		runner.Input("Sy").Bind(tn.Sy.RawMatrix().Data).CopyTo(),
-		runner.Input("Ty").Bind(tn.Ty.RawMatrix().Data).CopyTo(),
-		runner.Input("Rz").Bind(tn.Rz.RawMatrix().Data).CopyTo(),
-		runner.Input("Sz").Bind(tn.Sz.RawMatrix().Data).CopyTo(),
-		runner.Input("Tz").Bind(tn.Tz.RawMatrix().Data).CopyTo(),
+		runner.Input("U").Bind(U).ToMatrix().CopyTo(),
+		runner.Input("Rx").Bind(tn.Rx).ToMatrix().CopyTo(),
+		runner.Input("Sx").Bind(tn.Sx).ToMatrix().CopyTo(),
+		runner.Input("Tx").Bind(tn.Tx).ToMatrix().CopyTo(),
+		runner.Input("Ry").Bind(tn.Ry).ToMatrix().CopyTo(),
+		runner.Input("Sy").Bind(tn.Sy).ToMatrix().CopyTo(),
+		runner.Input("Ty").Bind(tn.Ty).ToMatrix().CopyTo(),
+		runner.Input("Rz").Bind(tn.Rz).ToMatrix().CopyTo(),
+		runner.Input("Sz").Bind(tn.Sz).ToMatrix().CopyTo(),
+		runner.Input("Tz").Bind(tn.Tz).ToMatrix().CopyTo(),
 		runner.Output("Dx").Bind(Dx).CopyBack(),
 		runner.Output("Dy").Bind(Dy).CopyBack(),
 		runner.Output("Dz").Bind(Dz).CopyBack(),
@@ -144,8 +146,7 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
-	UM := mat.NewDense(tn.Np, tn.K, U)
-	DxH, DyH, DzH := calcPhysicalDerivative(UM, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
+	DxH, DyH, DzH := calcPhysicalDerivative(U, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
 		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
 
 	_, _, _ = DxH, DyH, DzH
