@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
+	"gonum.org/v1/gonum/mat"
 	"reflect"
 	"unsafe"
 )
@@ -188,6 +189,27 @@ func (kr *Runner) copyFromDeviceWithConversion(spec *ParamSpec) error {
 		mem.CopyTo(unsafe.Pointer(&data[0]), totalSize)
 	case []int64:
 		mem.CopyTo(unsafe.Pointer(&data[0]), totalSize)
+	case mat.Matrix:
+		// Handle mat.Matrix for copy back
+		rows, cols := data.Dims()
+		size := rows * cols
+
+		// Create temporary buffer to receive device data
+		flatData := make([]float64, size)
+		mem.CopyTo(unsafe.Pointer(&flatData[0]), totalSize)
+
+		// Type assert to a mutable matrix type
+		switch m := data.(type) {
+		case *mat.Dense:
+			// Unpack column-major data back into the Dense matrix
+			for i := 0; i < rows; i++ {
+				for j := 0; j < cols; j++ {
+					// Column-major: position j*rows + i contains element (i,j)
+					val := flatData[j*rows+i]
+					m.Set(i, j, val)
+				}
+			}
+		}
 	default:
 		return fmt.Errorf("unsupported type for copy: %T", data)
 	}

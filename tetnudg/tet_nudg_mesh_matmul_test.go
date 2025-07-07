@@ -87,6 +87,6 @@ func TestTetNudgMatmul(t *testing.T) {
 	}
 
 	if order == 1 {
-		assert.InDeltaSlicef(t, expected, Ur, 1.e-8, "")
+		assert.InDeltaSlicef(t, expected, Ur.RawMatrix().Data, 1.e-8, "")
 	}
 }
