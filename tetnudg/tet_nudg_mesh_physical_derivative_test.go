@@ -109,19 +109,7 @@ func TestTetNudgMatCopy(t *testing.T) {
 }
 
 func TestTetNudgPhysicalDerivative(t *testing.T) {
-	// TODO: The issue this test has surfaced is that golang is ROW-MAJOR
-	//  storage of matrices, where all numerical libraries are COLUMN-MAJOR
-	//  We need to implement COLUMN-MAJOR in the DGKernel code because the
-	//  partitions need to be stored contiguously for us to slice them.
-	//  We will need to automatically transpose matrices when copying from
-	//  the host to device to implement the required COLUMN-MAJOR format.
-	//  We'll keep arrays unchanged,
-	//  and make notes so that a user will need to implement COLUMN-MAJOR
-	//  when flattening matrices into slices on the host before tranferring
-	//  to the device. This will perform optimally on host,
-	//  and allow for natural zero copy manipulation of partitions for
-	//  parallelism.
-	order := 1
+	order := 4
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Np := tn.Np
 	Ktot := tn.K
@@ -148,27 +136,27 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	}
 
 	U := mat.NewDense(Np, Ktot, nil)
-	UxExpected := mat.NewDense(Np, Ktot, nil)
-	UyExpected := mat.NewDense(Np, Ktot, nil)
-	UzExpected := mat.NewDense(Np, Ktot, nil)
+	DuDxExpected := mat.NewDense(Np, Ktot, nil)
+	DuDyExpected := mat.NewDense(Np, Ktot, nil)
+	DuDzExpected := mat.NewDense(Np, Ktot, nil)
 	fOrder := float64(order)
 	for K := 0; K < Ktot; K++ {
 		for j := 0; j < Np; j++ {
 			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
 			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
+			U.Set(j, K, xP+yP+zP)
 			dxP := float64(fOrder) * math.Pow(x, fOrder-1)
 			dyP := float64(fOrder) * math.Pow(y, fOrder-1)
 			dzP := float64(fOrder) * math.Pow(z, fOrder-1)
-			U.Set(j, K, xP+yP+zP)
-			UxExpected.Set(j, K, dxP)
-			UyExpected.Set(j, K, dyP)
-			UzExpected.Set(j, K, dzP)
+			DuDxExpected.Set(j, K, dxP)
+			DuDyExpected.Set(j, K, dyP)
+			DuDzExpected.Set(j, K, dzP)
 		}
 	}
 
-	Dx := make([]float64, totalNodes)
-	Dy := make([]float64, totalNodes)
-	Dz := make([]float64, totalNodes)
+	DuDx := make([]float64, totalNodes)
+	DuDy := make([]float64, totalNodes)
+	DuDz := make([]float64, totalNodes)
 	// Add array parameters
 	params = append(params,
 		builder.Input("U").Bind(U).CopyTo(),
@@ -181,9 +169,9 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		builder.Input("Rz").Bind(tn.Rz).CopyTo(),
 		builder.Input("Sz").Bind(tn.Sz).CopyTo(),
 		builder.Input("Tz").Bind(tn.Tz).CopyTo(),
-		builder.Output("Dx").Bind(Dx).CopyBack(),
-		builder.Output("Dy").Bind(Dy).CopyBack(),
-		builder.Output("Dz").Bind(Dz).CopyBack(),
+		builder.Output("DuDx").Bind(DuDx).CopyBack(),
+		builder.Output("DuDy").Bind(DuDy).CopyBack(),
+		builder.Output("DuDz").Bind(DuDz).CopyBack(),
 		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
 		builder.Temp("Us").Type(builder.Float64).Size(totalNodes),
 		builder.Temp("Ut").Type(builder.Float64).Size(totalNodes),
@@ -211,9 +199,9 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
         MATMUL_Ds_%s(U, Us, K[part]);
         MATMUL_Dt_%s(U, Ut, K[part]);
 
-        real_t* Dx = Dx_PART(part);
-        real_t* Dy = Dy_PART(part);
-        real_t* Dz = Dz_PART(part);
+        real_t* DuDx = DuDx_PART(part);
+        real_t* DuDy = DuDy_PART(part);
+        real_t* DuDz = DuDz_PART(part);
         const real_t* Rx = Rx_PART(part);
         const real_t* Sx = Sx_PART(part);
         const real_t* Tx = Tx_PART(part);
@@ -225,9 +213,9 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
         const real_t* Tz = Tz_PART(part);
 		// Single partition means we can safely use KpartMax as K[part]
 		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
-			Dx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
-			Dy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
-			Dz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
+			DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
+			DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
+			DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
 		}
     }
 }
@@ -244,23 +232,27 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
-	DxH, DyH, DzH := calcPhysicalDerivative(U, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
+	DuDxH, DuDyH, DuDzH := calcPhysicalDerivative(U, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
 		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
 
-	_, _, _ = DxH, DyH, DzH
-	assert.InDeltaSlicef(t, UxExpected.RawMatrix().Data, DxH, 1.e-8, "")
-	assert.InDeltaSlicef(t, UyExpected.RawMatrix().Data, DyH, 1.e-8, "")
-	assert.InDeltaSlicef(t, UzExpected.RawMatrix().Data, DzH, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDxH, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDyH, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzH, 1.e-8, "")
 	fmt.Println("Host calculation of physical derivative validates")
 
-	assert.InDeltaSlicef(t, UxExpected.RawMatrix().Data, Dx, 1.e-8, "")
-	assert.InDeltaSlicef(t, UyExpected.RawMatrix().Data, Dy, 1.e-8, "")
-	assert.InDeltaSlicef(t, UzExpected.RawMatrix().Data, Dz, 1.e-8, "")
+	// Because the data from the kernel is in column-major format, we need to
+	// transpose the matrix to compare it to the host calculation
+	DuDxT := mat.DenseCopyOf(mat.NewDense(Ktot, Np, DuDx).T()).RawMatrix().Data
+	DuDyT := mat.DenseCopyOf(mat.NewDense(Ktot, Np, DuDy).T()).RawMatrix().Data
+	DuDzT := mat.DenseCopyOf(mat.NewDense(Ktot, Np, DuDz).T()).RawMatrix().Data
+	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDxT, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDyT, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzT, 1.e-8, "")
 	fmt.Println("Device calculation of physical derivative validates")
 }
 
 func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
-	TzM, DrM, DsM, DtM *mat.Dense) (Dx, Dy, Dz []float64) {
+	TzM, DrM, DsM, DtM *mat.Dense) (DuDx, DuDy, DuDz []float64) {
 	var (
 		Np, K      = UM.Dims()
 		Ur, Us, Ut mat.Dense
@@ -268,17 +260,17 @@ func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
 	Ur.Mul(DrM, UM)
 	Us.Mul(DsM, UM)
 	Ut.Mul(DtM, UM)
-	Dx = make([]float64, Np*K)
-	Dy = make([]float64, Np*K)
-	Dz = make([]float64, Np*K)
+	DuDx = make([]float64, Np*K)
+	DuDy = make([]float64, Np*K)
+	DuDz = make([]float64, Np*K)
 	for i, ur := range Ur.RawMatrix().Data {
 		us, ut := Us.RawMatrix().Data[i], Ut.RawMatrix().Data[i]
 		rx, ry, rz := RxM.RawMatrix().Data[i], RyM.RawMatrix().Data[i], RzM.RawMatrix().Data[i]
 		sx, sy, sz := SxM.RawMatrix().Data[i], SyM.RawMatrix().Data[i], SzM.RawMatrix().Data[i]
 		tx, ty, tz := TxM.RawMatrix().Data[i], TyM.RawMatrix().Data[i], TzM.RawMatrix().Data[i]
-		Dx[i] = rx*ur + sx*us + tx*ut
-		Dy[i] = ry*ur + sy*us + ty*ut
-		Dz[i] = rz*ur + sz*us + tz*ut
+		DuDx[i] = rx*ur + sx*us + tx*ut
+		DuDy[i] = ry*ur + sy*us + ty*ut
+		DuDz[i] = rz*ur + sz*us + tz*ut
 	}
 	return
 }
