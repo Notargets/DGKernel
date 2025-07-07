@@ -250,9 +250,11 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		}
 	}
 
-	DuDx := make([]float64, totalNodes)
-	DuDy := make([]float64, totalNodes)
-	DuDz := make([]float64, totalNodes)
+	// Use matrices for the host output to get the automatic conversion to
+	// row-major storage format
+	DuDx := mat.NewDense(Np, Ktot, nil)
+	DuDy := mat.NewDense(Np, Ktot, nil)
+	DuDz := mat.NewDense(Np, Ktot, nil)
 	// Add array parameters
 	params = append(params,
 		builder.Input("U").Bind(U).CopyTo(),
@@ -308,11 +310,17 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
         const real_t* Sz = Sz_PART(part);
         const real_t* Tz = Tz_PART(part);
 		// Single partition means we can safely use KpartMax as K[part]
+        // ************************************************************
+		// *** This computation is happening in column-major format ***
+        // ************************************************************
 		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
 			DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
 			DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
 			DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
 		}
+        // ************************************************************
+		// ** When DuDx... are copied back to host they r transposed **
+        // ************************************************************
     }
 }
 `, tn.Np, kernelName, signature,
@@ -336,14 +344,9 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzH, 1.e-8, "")
 	fmt.Println("Host calculation of physical derivative validates")
 
-	// Because the data from the kernel is in column-major format, we need to
-	// transpose the matrix to compare it to the host calculation
-	DuDxT := mat.DenseCopyOf(mat.NewDense(Ktot, Np, DuDx).T()).RawMatrix().Data
-	DuDyT := mat.DenseCopyOf(mat.NewDense(Ktot, Np, DuDy).T()).RawMatrix().Data
-	DuDzT := mat.DenseCopyOf(mat.NewDense(Ktot, Np, DuDz).T()).RawMatrix().Data
-	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDxT, 1.e-8, "")
-	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDyT, 1.e-8, "")
-	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzT, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDx.RawMatrix().Data, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDy.RawMatrix().Data, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDz.RawMatrix().Data, 1.e-8, "")
 	fmt.Println("Device calculation of physical derivative validates")
 }
 
@@ -353,12 +356,16 @@ func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
 		Np, K      = UM.Dims()
 		Ur, Us, Ut mat.Dense
 	)
+	// These matrix multiplies result in row-major format storage into Ur,Us,Ut
 	Ur.Mul(DrM, UM)
 	Us.Mul(DsM, UM)
 	Ut.Mul(DtM, UM)
 	DuDx = make([]float64, Np*K)
 	DuDy = make([]float64, Np*K)
 	DuDz = make([]float64, Np*K)
+	// ************************************************************
+	// **** This computation is happening in row-major format *****
+	// ************************************************************
 	for i, ur := range Ur.RawMatrix().Data {
 		us, ut := Us.RawMatrix().Data[i], Ut.RawMatrix().Data[i]
 		rx, ry, rz := RxM.RawMatrix().Data[i], RyM.RawMatrix().Data[i], RzM.RawMatrix().Data[i]
@@ -368,5 +375,8 @@ func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
 		DuDy[i] = ry*ur + sy*us + ty*ut
 		DuDz[i] = rz*ur + sz*us + tz*ut
 	}
+	// ************************************************************
+	// ************* DuDx... are in row-major format **************
+	// ************************************************************
 	return
 }
