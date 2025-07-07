@@ -140,7 +140,7 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	DxH := mat.NewDense(Np, Ktot, nil)
 	for K := 0; K < Ktot; K++ {
 		for j := 0; j < Np; j++ {
-			DxH.Set(j, K, Ur.At(j, K)*tn.Rx.At(j, K))
+			DxH.Set(j, K, tn.Rx.At(j, K)*Ur.At(j, K))
 		}
 	}
 
@@ -180,6 +180,7 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 		// *** This computation is happening in column-major format ***
         // ************************************************************
 		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
+			// DxH.Set(j, K, tn.Rx.At(j, K)*Ur.At(j, K))
 			Dx[i] = Rx[i]*Ur[i];
 		}
         // ************************************************************
