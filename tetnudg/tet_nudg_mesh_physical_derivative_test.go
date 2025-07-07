@@ -12,19 +12,7 @@ import (
 )
 
 func TestTetNudgMatCopy(t *testing.T) {
-	// TODO: The issue this test has surfaced is that golang is ROW-MAJOR
-	//  storage of matrices, where all numerical libraries are COLUMN-MAJOR
-	//  We need to implement COLUMN-MAJOR in the DGKernel code because the
-	//  partitions need to be stored contiguously for us to slice them.
-	//  We will need to automatically transpose matrices when copying from
-	//  the host to device to implement the required COLUMN-MAJOR format.
-	//  We'll keep arrays unchanged,
-	//  and make notes so that a user will need to implement COLUMN-MAJOR
-	//  when flattening matrices into slices on the host before tranferring
-	//  to the device. This will perform optimally on host,
-	//  and allow for natural zero copy manipulation of partitions for
-	//  parallelism.
-	order := 1
+	order := 2
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Np := tn.Np
 	Ktot := tn.K
@@ -106,6 +94,114 @@ func TestTetNudgMatCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
+}
+
+func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
+	order := 2
+	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
+	Np := tn.Np
+	Ktot := tn.K
+	totalNodes := Np * Ktot
+	props := tn.GetProperties()
+
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	k := []int{Ktot}
+	kp := runner.NewRunner(device, builder.Config{
+		K:         k,
+		FloatType: builder.Float64,
+	})
+	defer kp.Free()
+
+	// Collect all matrices into param builders
+	matrices := tn.GetRefMatrices()
+	params := make([]*builder.ParamBuilder, 0, len(matrices)+2)
+
+	// Add matrices as parameters
+	for name, mat := range matrices {
+		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
+	}
+
+	// Use all host side matrix based computations.
+	// Note that these result in a storage of the answers in row-major format
+	U := mat.NewDense(Np, Ktot, nil)
+	fOrder := float64(order)
+	for K := 0; K < Ktot; K++ {
+		for j := 0; j < Np; j++ {
+			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
+			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
+			U.Set(j, K, xP+yP+zP)
+		}
+	}
+	var Ur mat.Dense
+	Ur.Mul(tn.Dr, U)
+	// DxH is the host calculated value to be compared with the device value
+	DxH := mat.NewDense(Np, Ktot, nil)
+	for K := 0; K < Ktot; K++ {
+		for j := 0; j < Np; j++ {
+			DxH.Set(j, K, Ur.At(j, K)*tn.Rx.At(j, K))
+		}
+	}
+
+	Dx := mat.NewDense(Np, Ktot, nil)
+	// Add array parameters
+	params = append(params,
+		// Since U and Rx are matrices, they will be transposed on CopyTo()
+		builder.Input("U").Bind(U).CopyTo(),
+		builder.Input("Rx").Bind(tn.Rx).CopyTo(),
+		// Since Dx is a matrix, it will be transposed on CopyBack()
+		builder.Output("Dx").Bind(Dx).CopyBack(),
+		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
+	)
+
+	// Define kernel with all parameters
+	kernelName := "differentiate"
+	err := kp.DefineKernel(kernelName, params...)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
+	}
+
+	// Get signature and build kernel
+	signature, _ := kp.GetKernelSignature(kernelName)
+	kernelSource := fmt.Sprintf(`
+#define NP %d
+
+@kernel void %s(%s) {
+    for (int part = 0; part < NPART; ++part; @outer) {
+        const real_t* U = U_PART(part);
+        real_t* Ur = Ur_PART(part);
+        MATMUL_Dr_%s(U, Ur, K[part]);
+
+        real_t* Dx = Dx_PART(part);
+        const real_t* Rx = Rx_PART(part);
+		// Single partition means we can safely use KpartMax as K[part]
+        // ************************************************************
+		// *** This computation is happening in column-major format ***
+        // ************************************************************
+		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
+			Dx[i] = Rx[i]*Ur[i];
+		}
+        // ************************************************************
+		// *** When Dx is copied back to host, it will be transposed **
+        // ************************************************************
+    }
+}
+`, tn.Np, kernelName, signature, props.ShortName)
+
+	_, err = kp.BuildKernel(kernelSource, kernelName)
+	if err != nil {
+		t.Fatalf("Failed to build kernel: %v", err)
+	}
+	// Execute differentiation
+	err = kp.RunKernel(kernelName)
+	if err != nil {
+		t.Fatalf("Kernel execution failed: %v", err)
+	}
+
+	// Dx is now in row-major format and can be compared directly to the host
+	// matrix result
+	assert.InDeltaSlicef(t, DxH.RawMatrix().Data, Dx.RawMatrix().Data, 1.e-8, "")
 }
 
 func TestTetNudgPhysicalDerivative(t *testing.T) {
