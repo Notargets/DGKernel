@@ -34,10 +34,10 @@ func TestParameterAPI_BasicUsage(t *testing.T) {
 
 	// Define kernel using new API
 	err := kp.DefineKernel("computeRHS",
-		Input("U").Bind(hostU).CopyTo(), // Copy input to device
-		Output("RHS").Bind(hostRHS),     // Output array, no initial copy
-		Scalar("dt").Bind(dt),           // Scalar parameter
-		Scalar("alpha").Bind(alpha),     // Another scalar
+		builder.Input("U").Bind(hostU).CopyTo(), // Copy input to device
+		builder.Output("RHS").Bind(hostRHS),     // Output array, no initial copy
+		builder.Scalar("dt").Bind(dt),           // Scalar parameter
+		builder.Scalar("alpha").Bind(alpha),     // Another scalar
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -131,10 +131,10 @@ func TestParameterAPI_MatrixSupport(t *testing.T) {
 
 	// Define kernel with matrices
 	err := kp.DefineKernel("differentiate",
-		Input("Dr").Bind(Dr).ToMatrix().Static(),           // Static matrix
-		Input("Mass").Bind(massFlat).ToMatrix().Stride(np), // Device matrix from flat array
-		Input("U").Bind(hostU).CopyTo(),
-		Output("Ur").Bind(hostUr),
+		builder.Input("Dr").Bind(Dr).ToMatrix().Static(),           // Static matrix
+		builder.Input("Mass").Bind(massFlat).ToMatrix().Stride(np), // Device matrix from flat array
+		builder.Input("U").Bind(hostU).CopyTo(),
+		builder.Output("Ur").Bind(hostUr),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -183,8 +183,8 @@ func TestParameterAPI_TypeConversion(t *testing.T) {
 
 	// Define kernel with type conversion
 	err := kp.DefineKernel("processData",
-		Input("data").Bind(hostData).CopyTo().Convert(builder.Float32), // Convert during copy
-		Temp("work").Type(builder.Float32).Size(10),                    // Device-only array
+		builder.Input("data").Bind(hostData).CopyTo().Convert(builder.Float32), // Convert during copy
+		builder.Temp("work").Type(builder.Float32).Size(10),                    // Device-only array
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -213,7 +213,7 @@ func TestParameterAPI_InOut(t *testing.T) {
 
 	// Define kernel with InOut parameter
 	err := kp.DefineKernel("doubleData",
-		InOut("data").Bind(hostData).Copy(), // Copy to device before, from device after
+		builder.InOut("data").Bind(hostData).Copy(), // Copy to device before, from device after
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)

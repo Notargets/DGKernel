@@ -40,17 +40,17 @@ func TestTetNudgMatmul(t *testing.T) {
 
 	// Collect all matrices into param builders
 	matrices := tn.GetRefMatrices()
-	params := make([]*runner.ParamBuilder, 0, len(matrices)+2)
+	params := make([]*builder.ParamBuilder, 0, len(matrices)+2)
 
 	// Add matrices as parameters
 	for name, mat := range matrices {
-		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
+		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
 	}
 
 	// Add array parameters
 	params = append(params,
-		runner.Input("U").Bind(U).CopyTo(),
-		runner.Output("Ur").Bind(Ur).CopyBack(),
+		builder.Input("U").Bind(U).CopyTo(),
+		builder.Output("Ur").Bind(Ur).CopyBack(),
 	)
 
 	// Define kernel with all parameters

@@ -46,9 +46,9 @@ func TestRunner_MatrixOperations(t *testing.T) {
 
 	// Define kernel with static matrix
 	err := kp.DefineKernel("matmul",
-		Input("TestMat").Bind(testMatrix).ToMatrix().Static(),
-		Input("U").Bind(hostU).CopyTo(),
-		Output("V").Bind(hostV),
+		builder.Input("TestMat").Bind(testMatrix).ToMatrix().Static(),
+		builder.Input("U").Bind(hostU).CopyTo(),
+		builder.Output("V").Bind(hostV),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -147,9 +147,9 @@ func TestRunner_DeviceMatrix(t *testing.T) {
 
 	// Define kernel with device matrix
 	err := kp.DefineKernel("differentiate",
-		Input("Dr").Bind(Dr).ToMatrix(), // Device matrix (not static)
-		Input("U").Bind(hostU).CopyTo(),
-		Output("Ur").Bind(hostUr),
+		builder.Input("Dr").Bind(Dr).ToMatrix(), // Device matrix (not static)
+		builder.Input("U").Bind(hostU).CopyTo(),
+		builder.Output("Ur").Bind(hostUr),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -222,9 +222,9 @@ func TestRunner_MatrixFromFlatArray(t *testing.T) {
 
 	// Define kernel with flat array promoted to matrix
 	err := kp.DefineKernel("applyMass",
-		Input("Mass").Bind(massFlat).ToMatrix().Stride(np),
-		Input("U").Bind(hostU).CopyTo(),
-		Output("MU").Bind(hostMU),
+		builder.Input("Mass").Bind(massFlat).ToMatrix().Stride(np),
+		builder.Input("U").Bind(hostU).CopyTo(),
+		builder.Output("MU").Bind(hostMU),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -309,11 +309,11 @@ func TestRunner_MixedMatrices(t *testing.T) {
 
 	// Define kernel with mixed matrices
 	err := kp.DefineKernel("mixedOps",
-		Input("Small").Bind(smallMat).ToMatrix().Static(),
-		Input("Large").Bind(largeMat).ToMatrix(), // Device matrix
-		Input("U").Bind(hostU).CopyTo(),
-		Output("V").Bind(hostV),
-		Output("W").Bind(hostW),
+		builder.Input("Small").Bind(smallMat).ToMatrix().Static(),
+		builder.Input("Large").Bind(largeMat).ToMatrix(), // Device matrix
+		builder.Input("U").Bind(hostU).CopyTo(),
+		builder.Output("V").Bind(hostV),
+		builder.Output("W").Bind(hostW),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)

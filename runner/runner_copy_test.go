@@ -26,7 +26,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 		}
 
 		err := kp.DefineKernel("copyto_test",
-			Input("data").Bind(hostData).CopyTo(), // Only copies to device
+			builder.Input("data").Bind(hostData).CopyTo(), // Only copies to device
 		)
 		if err != nil {
 			t.Fatalf("Failed to define kernel: %v", err)
@@ -67,7 +67,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 		}
 
 		err := kp.DefineKernel("copy_test",
-			InOut("data").Bind(hostData).Copy(), // Copies both ways
+			builder.InOut("data").Bind(hostData).Copy(), // Copies both ways
 		)
 		if err != nil {
 			t.Fatalf("Failed to define kernel: %v", err)
@@ -103,7 +103,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 		hostData := make([]float64, 10)
 
 		err := kp.DefineKernel("nocopy_test",
-			Output("data").Bind(hostData).NoCopy(),
+			builder.Output("data").Bind(hostData).NoCopy(),
 		)
 		if err != nil {
 			t.Fatalf("Failed to define kernel: %v", err)
@@ -173,7 +173,7 @@ func TestRunner_PartitionCopy(t *testing.T) {
 	}
 
 	err := kp.DefineKernel("partition_test",
-		InOut("data").Bind(hostData).Copy(),
+		builder.InOut("data").Bind(hostData).Copy(),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -237,8 +237,8 @@ func TestRunner_TypeConversion(t *testing.T) {
 	}
 
 	err := kp.DefineKernel("convert_test",
-		Input("input").Bind(hostData64).CopyTo().Convert(builder.Float32),
-		Output("output").Bind(hostResult32), // No conversion needed
+		builder.Input("input").Bind(hostData64).CopyTo().Convert(builder.Float32),
+		builder.Output("output").Bind(hostResult32), // No conversion needed
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -293,10 +293,10 @@ func TestRunner_WorkingArrays(t *testing.T) {
 
 	// Define kernel with working arrays
 	err := kp.DefineKernel("working_test",
-		Input("input").Bind(hostInput).CopyTo(),
-		Output("output").Bind(hostOutput),
-		Temp("scratch1").Type(builder.Float64).Size(50),
-		Temp("scratch2").Type(builder.Float64).Size(50),
+		builder.Input("input").Bind(hostInput).CopyTo(),
+		builder.Output("output").Bind(hostOutput),
+		builder.Temp("scratch1").Type(builder.Float64).Size(50),
+		builder.Temp("scratch2").Type(builder.Float64).Size(50),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)

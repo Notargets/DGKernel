@@ -43,11 +43,11 @@ func TestTetNudgMatCopy(t *testing.T) {
 
 	// Collect all matrices into param builders
 	matrices := tn.GetRefMatrices()
-	params := make([]*runner.ParamBuilder, 0, len(matrices)+2)
+	params := make([]*builder.ParamBuilder, 0, len(matrices)+2)
 
 	// Add matrices as parameters
 	for name, mat := range matrices {
-		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
+		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
 	}
 
 	U := mat.NewDense(Np, Ktot, nil)
@@ -63,10 +63,10 @@ func TestTetNudgMatCopy(t *testing.T) {
 	Dx := make([]float64, totalNodes)
 	// Add array parameters
 	params = append(params,
-		runner.Input("U").Bind(U).CopyTo(),
-		runner.Input("Rx").Bind(tn.Rx).CopyTo(),
-		runner.Output("Dx").Bind(Dx).CopyBack(),
-		runner.Temp("Ur").Type(builder.Float64).Size(totalNodes),
+		builder.Input("U").Bind(U).CopyTo(),
+		builder.Input("Rx").Bind(tn.Rx).CopyTo(),
+		builder.Output("Dx").Bind(Dx).CopyBack(),
+		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
 	)
 
 	// Define kernel with all parameters
@@ -140,11 +140,11 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 
 	// Collect all matrices into param builders
 	matrices := tn.GetRefMatrices()
-	params := make([]*runner.ParamBuilder, 0, len(matrices)+2)
+	params := make([]*builder.ParamBuilder, 0, len(matrices)+2)
 
 	// Add matrices as parameters
 	for name, mat := range matrices {
-		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
+		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
 	}
 
 	U := mat.NewDense(Np, Ktot, nil)
@@ -171,22 +171,22 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	Dz := make([]float64, totalNodes)
 	// Add array parameters
 	params = append(params,
-		runner.Input("U").Bind(U).CopyTo(),
-		runner.Input("Rx").Bind(tn.Rx).CopyTo(),
-		runner.Input("Sx").Bind(tn.Sx).CopyTo(),
-		runner.Input("Tx").Bind(tn.Tx).CopyTo(),
-		runner.Input("Ry").Bind(tn.Ry).CopyTo(),
-		runner.Input("Sy").Bind(tn.Sy).CopyTo(),
-		runner.Input("Ty").Bind(tn.Ty).CopyTo(),
-		runner.Input("Rz").Bind(tn.Rz).CopyTo(),
-		runner.Input("Sz").Bind(tn.Sz).CopyTo(),
-		runner.Input("Tz").Bind(tn.Tz).CopyTo(),
-		runner.Output("Dx").Bind(Dx).CopyBack(),
-		runner.Output("Dy").Bind(Dy).CopyBack(),
-		runner.Output("Dz").Bind(Dz).CopyBack(),
-		runner.Temp("Ur").Type(builder.Float64).Size(totalNodes),
-		runner.Temp("Us").Type(builder.Float64).Size(totalNodes),
-		runner.Temp("Ut").Type(builder.Float64).Size(totalNodes),
+		builder.Input("U").Bind(U).CopyTo(),
+		builder.Input("Rx").Bind(tn.Rx).CopyTo(),
+		builder.Input("Sx").Bind(tn.Sx).CopyTo(),
+		builder.Input("Tx").Bind(tn.Tx).CopyTo(),
+		builder.Input("Ry").Bind(tn.Ry).CopyTo(),
+		builder.Input("Sy").Bind(tn.Sy).CopyTo(),
+		builder.Input("Ty").Bind(tn.Ty).CopyTo(),
+		builder.Input("Rz").Bind(tn.Rz).CopyTo(),
+		builder.Input("Sz").Bind(tn.Sz).CopyTo(),
+		builder.Input("Tz").Bind(tn.Tz).CopyTo(),
+		builder.Output("Dx").Bind(Dx).CopyBack(),
+		builder.Output("Dy").Bind(Dy).CopyBack(),
+		builder.Output("Dz").Bind(Dz).CopyBack(),
+		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
+		builder.Temp("Us").Type(builder.Float64).Size(totalNodes),
+		builder.Temp("Ut").Type(builder.Float64).Size(totalNodes),
 	)
 
 	// Define kernel with all parameters

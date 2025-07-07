@@ -61,10 +61,10 @@ func benchmarkMatrixOps(b *testing.B, k []int, np int) {
 
 	// Define kernel with new API - much simpler!
 	err := kp.DefineKernel("matmul",
-		Input("Dr").Bind(Dr).ToMatrix().Static(),
-		InOut("U").Bind(hostU).CopyTo(),  // Only copy once at start
-		Output("V").Bind(hostV).NoCopy(), // Keep on device
-		Output("W").Bind(hostW).NoCopy(), // Keep on device
+		builder.Input("Dr").Bind(Dr).ToMatrix().Static(),
+		builder.InOut("U").Bind(hostU).CopyTo(),  // Only copy once at start
+		builder.Output("V").Bind(hostV).NoCopy(), // Keep on device
+		builder.Output("W").Bind(hostW).NoCopy(), // Keep on device
 	)
 	if err != nil {
 		b.Fatalf("Failed to define kernel: %v", err)
@@ -176,7 +176,7 @@ func BenchmarkRunner_TypeConversion(b *testing.B) {
 				}
 
 				kp.DefineKernel("process_f32",
-					InOut("data").Bind(hostData32).Copy(),
+					builder.InOut("data").Bind(hostData32).Copy(),
 				)
 
 				b.ResetTimer()
@@ -188,8 +188,8 @@ func BenchmarkRunner_TypeConversion(b *testing.B) {
 			// With conversion
 			b.Run("WithConversion_f64_to_f32", func(b *testing.B) {
 				kp.DefineKernel("process_convert",
-					Input("data").Bind(hostData).CopyTo().Convert(builder.Float32),
-					Output("result").Bind(hostResult).CopyBack().Convert(builder.Float64),
+					builder.Input("data").Bind(hostData).CopyTo().Convert(builder.Float32),
+					builder.Output("result").Bind(hostResult).CopyBack().Convert(builder.Float64),
 				)
 
 				b.ResetTimer()
@@ -222,9 +222,9 @@ func BenchmarkRunner_MemoryPatterns(b *testing.B) {
 		hostU := make([]float64, totalNodes)
 
 		kp.DefineKernel("with_temp",
-			Input("U").Bind(hostU).CopyTo(),
-			Temp("scratch1").Type(builder.Float64).Size(totalNodes),
-			Temp("scratch2").Type(builder.Float64).Size(totalNodes),
+			builder.Input("U").Bind(hostU).CopyTo(),
+			builder.Temp("scratch1").Type(builder.Float64).Size(totalNodes),
+			builder.Temp("scratch2").Type(builder.Float64).Size(totalNodes),
 		)
 
 		signature, _ := kp.GetKernelSignature("with_temp")
@@ -272,7 +272,7 @@ func BenchmarkRunner_MemoryPatterns2(b *testing.B) {
 		hostData := make([]float64, totalNodes)
 
 		kp.DefineKernel("inout",
-			InOut("data").Bind(hostData).Copy(),
+			builder.InOut("data").Bind(hostData).Copy(),
 		)
 
 		signature, _ := kp.GetKernelSignature("inout")

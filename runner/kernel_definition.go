@@ -10,16 +10,16 @@ import (
 // KernelDefinition holds all information about a defined kernel
 type KernelDefinition struct {
 	Name       string
-	Parameters []ParamSpec
+	Parameters []builder.ParamSpec
 	Signature  string
 }
 
 // DefineKernel defines a kernel with its parameters using the new API
-func (kr *Runner) DefineKernel(kernelName string, params ...*ParamBuilder) error {
+func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilder) error {
 	// Extract and validate parameter specifications
-	paramSpecs := make([]ParamSpec, len(params))
+	paramSpecs := make([]builder.ParamSpec, len(params))
 	for i, p := range params {
-		paramSpecs[i] = p.spec
+		paramSpecs[i] = p.Spec
 		if err := paramSpecs[i].Validate(); err != nil {
 			return fmt.Errorf("parameter %d: %w", i, err)
 		}
@@ -53,13 +53,13 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*ParamBuilder) error
 }
 
 // processParameter handles allocation and setup for a single parameter
-func (kr *Runner) processParameter(spec *ParamSpec) error {
+func (kr *Runner) processParameter(spec *builder.ParamSpec) error {
 	switch spec.Direction {
-	case DirectionScalar:
+	case builder.DirectionScalar:
 		// Scalars don't need allocation, just type checking
 		return nil
 
-	case DirectionTemp:
+	case builder.DirectionTemp:
 		// Allocate device-only array
 		return kr.allocateTempArray(spec)
 
@@ -85,7 +85,7 @@ func (kr *Runner) processParameter(spec *ParamSpec) error {
 }
 
 // allocateTempArray allocates a device-only temporary array
-func (kr *Runner) allocateTempArray(spec *ParamSpec) error {
+func (kr *Runner) allocateTempArray(spec *builder.ParamSpec) error {
 	// Create array spec
 	arraySpec := builder.ArraySpec{
 		Name:      spec.Name,
@@ -99,7 +99,7 @@ func (kr *Runner) allocateTempArray(spec *ParamSpec) error {
 }
 
 // allocateArrayFromSpec allocates an array from parameter specification
-func (kr *Runner) allocateArrayFromSpec(spec *ParamSpec) error {
+func (kr *Runner) allocateArrayFromSpec(spec *builder.ParamSpec) error {
 	// Determine effective type (considering conversion)
 	effectiveType := spec.GetEffectiveType()
 
@@ -134,7 +134,7 @@ func (kr *Runner) allocateArrayFromSpec(spec *ParamSpec) error {
 }
 
 // addStaticMatrixFromSpec adds a static matrix from parameter specification
-func (kr *Runner) addStaticMatrixFromSpec(spec *ParamSpec) error {
+func (kr *Runner) addStaticMatrixFromSpec(spec *builder.ParamSpec) error {
 	var matrix mat.Matrix
 
 	if m, ok := spec.HostBinding.(mat.Matrix); ok {
@@ -151,7 +151,7 @@ func (kr *Runner) addStaticMatrixFromSpec(spec *ParamSpec) error {
 }
 
 // addDeviceMatrixFromSpec adds a device matrix from parameter specification
-func (kr *Runner) addDeviceMatrixFromSpec(spec *ParamSpec) error {
+func (kr *Runner) addDeviceMatrixFromSpec(spec *builder.ParamSpec) error {
 	var matrix mat.Matrix
 
 	if m, ok := spec.HostBinding.(mat.Matrix); ok {
@@ -179,7 +179,7 @@ func (kr *Runner) addDeviceMatrixFromSpec(spec *ParamSpec) error {
 }
 
 // flatArrayToMatrix converts a flat array to a matrix using stride
-func (kr *Runner) flatArrayToMatrix(spec *ParamSpec) mat.Matrix {
+func (kr *Runner) flatArrayToMatrix(spec *builder.ParamSpec) mat.Matrix {
 	// This is a simplified version - real implementation would handle type conversion
 	if data, ok := spec.HostBinding.([]float64); ok {
 		return mat.NewDense(spec.MatrixRows, spec.MatrixCols, data)
@@ -189,7 +189,7 @@ func (kr *Runner) flatArrayToMatrix(spec *ParamSpec) mat.Matrix {
 }
 
 // verifyExistingAllocation checks if existing allocation is compatible
-func (kr *Runner) verifyExistingAllocation(spec *ParamSpec) error {
+func (kr *Runner) verifyExistingAllocation(spec *builder.ParamSpec) error {
 	meta, exists := kr.arrayMetadata[spec.Name]
 	if !exists {
 		return fmt.Errorf("array %s allocated but metadata missing", spec.Name)
@@ -221,7 +221,7 @@ func (kr *Runner) verifyExistingAllocation(spec *ParamSpec) error {
 }
 
 // generateSignatureFromParams creates kernel signature from parameters
-func (kr *Runner) generateSignatureFromParams(params []ParamSpec) string {
+func (kr *Runner) generateSignatureFromParams(params []builder.ParamSpec) string {
 	var parts []string
 
 	// K array is always first
@@ -242,7 +242,7 @@ func (kr *Runner) generateSignatureFromParams(params []ParamSpec) string {
 
 	// Add arrays
 	for _, p := range params {
-		if p.Direction == DirectionScalar || (p.IsMatrix && !p.IsStatic) {
+		if p.Direction == builder.DirectionScalar || (p.IsMatrix && !p.IsStatic) {
 			continue // Skip scalars and already-added matrices
 		}
 
@@ -260,7 +260,7 @@ func (kr *Runner) generateSignatureFromParams(params []ParamSpec) string {
 
 	// Add scalars last
 	for _, p := range params {
-		if p.Direction == DirectionScalar {
+		if p.Direction == builder.DirectionScalar {
 			typeStr := "real_t"
 			if p.DataType == builder.INT32 || p.DataType == builder.INT64 {
 				typeStr = "int_t"

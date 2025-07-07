@@ -9,7 +9,7 @@ import (
 )
 
 // copyToDeviceWithConversion handles host→device copy with optional type conversion
-func (kr *Runner) copyToDeviceWithConversion(spec *ParamSpec) error {
+func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
 	mem := kr.GetMemory(spec.Name)
 	if mem == nil {
 		return fmt.Errorf("memory for %s not found", spec.Name)
@@ -87,7 +87,7 @@ func (kr *Runner) copyWithTypeConversion(hostData interface{}, deviceMem *gocca.
 }
 
 // copyFromDeviceWithConversion handles device→host copy with optional type conversion
-func (kr *Runner) copyFromDeviceWithConversion(spec *ParamSpec) error {
+func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
 	mem := kr.GetMemory(spec.Name)
 	if mem == nil {
 		return fmt.Errorf("memory for %s not found", spec.Name)

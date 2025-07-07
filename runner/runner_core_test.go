@@ -109,7 +109,7 @@ func TestRunner_BasicComputation(t *testing.T) {
 
 	// Define kernel with new API
 	err := kp.DefineKernel("setValues",
-		InOut("data").Bind(hostData).Copy(), // Copy in and out
+		builder.InOut("data").Bind(hostData).Copy(), // Copy in and out
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -180,10 +180,10 @@ func TestRunner_MultiplePartitions(t *testing.T) {
 
 	// Define kernel
 	err := kp.DefineKernel("vectorAdd",
-		Input("A").Bind(hostA).CopyTo(),
-		Input("B").Bind(hostB).CopyTo(),
-		Output("C").Bind(hostC),
-		Scalar("alpha").Bind(1.5),
+		builder.Input("A").Bind(hostA).CopyTo(),
+		builder.Input("B").Bind(hostB).CopyTo(),
+		builder.Output("C").Bind(hostC),
+		builder.Scalar("alpha").Bind(1.5),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -252,7 +252,7 @@ func TestRunner_EmptyPartition(t *testing.T) {
 
 	// Define kernel
 	err := kp.DefineKernel("processData",
-		InOut("data").Bind(hostData).Copy(),
+		builder.InOut("data").Bind(hostData).Copy(),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -330,7 +330,7 @@ func TestRunner_TypeMismatch(t *testing.T) {
 	// Define with float64
 	hostData := make([]float64, 10)
 	err := kp.DefineKernel("test",
-		Input("data").Bind(hostData).CopyTo(),
+		builder.Input("data").Bind(hostData).CopyTo(),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)

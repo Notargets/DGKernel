@@ -1,8 +1,7 @@
-package runner
+package builder
 
 import (
 	"fmt"
-	"github.com/notargets/DGKernel/runner/builder"
 	"gonum.org/v1/gonum/mat"
 	"reflect"
 )
@@ -20,7 +19,7 @@ const (
 
 // ParamBuilder provides a fluent interface for building kernel parameters
 type ParamBuilder struct {
-	spec ParamSpec
+	Spec ParamSpec
 }
 
 // ParamSpec holds the complete specification for a kernel parameter
@@ -30,16 +29,16 @@ type ParamSpec struct {
 	HostBinding interface{}
 
 	// Type and size (inferred or explicit)
-	DataType builder.DataType
+	DataType DataType
 	Size     int64
 
 	// Data movement
 	DoCopyTo    bool
 	DoCopyBack  bool
-	ConvertType builder.DataType // 0 means no conversion
+	ConvertType DataType // 0 means no conversion
 
 	// Memory attributes
-	Alignment builder.AlignmentType
+	Alignment AlignmentType
 
 	// Matrix attributes
 	IsMatrix   bool
@@ -52,7 +51,7 @@ type ParamSpec struct {
 // Input creates a parameter specification for a const input
 func Input(deviceName string) *ParamBuilder {
 	return &ParamBuilder{
-		spec: ParamSpec{
+		Spec: ParamSpec{
 			Name:      deviceName,
 			Direction: DirectionInput,
 		},
@@ -62,7 +61,7 @@ func Input(deviceName string) *ParamBuilder {
 // Output creates a parameter specification for a non-const output
 func Output(deviceName string) *ParamBuilder {
 	return &ParamBuilder{
-		spec: ParamSpec{
+		Spec: ParamSpec{
 			Name:      deviceName,
 			Direction: DirectionOutput,
 		},
@@ -72,7 +71,7 @@ func Output(deviceName string) *ParamBuilder {
 // InOut creates a parameter specification for a non-const input/output
 func InOut(deviceName string) *ParamBuilder {
 	return &ParamBuilder{
-		spec: ParamSpec{
+		Spec: ParamSpec{
 			Name:      deviceName,
 			Direction: DirectionInOut,
 		},
@@ -82,7 +81,7 @@ func InOut(deviceName string) *ParamBuilder {
 // Scalar creates a parameter specification for a scalar value
 func Scalar(deviceName string) *ParamBuilder {
 	return &ParamBuilder{
-		spec: ParamSpec{
+		Spec: ParamSpec{
 			Name:      deviceName,
 			Direction: DirectionScalar,
 		},
@@ -92,7 +91,7 @@ func Scalar(deviceName string) *ParamBuilder {
 // Temp creates a parameter specification for a device-only temporary array
 func Temp(deviceName string) *ParamBuilder {
 	return &ParamBuilder{
-		spec: ParamSpec{
+		Spec: ParamSpec{
 			Name:      deviceName,
 			Direction: DirectionTemp,
 		},
@@ -101,7 +100,7 @@ func Temp(deviceName string) *ParamBuilder {
 
 // Bind associates a host variable with this parameter
 func (p *ParamBuilder) Bind(hostVar interface{}) *ParamBuilder {
-	p.spec.HostBinding = hostVar
+	p.Spec.HostBinding = hostVar
 
 	// Infer type and size if possible
 	p.inferFromBinding()
@@ -111,56 +110,56 @@ func (p *ParamBuilder) Bind(hostVar interface{}) *ParamBuilder {
 
 // Copy sets bidirectional copy (host→device before, device→host after)
 func (p *ParamBuilder) Copy() *ParamBuilder {
-	p.spec.DoCopyTo = true
-	p.spec.DoCopyBack = true
+	p.Spec.DoCopyTo = true
+	p.Spec.DoCopyBack = true
 	return p
 }
 
 // CopyTo sets host→device copy before kernel execution
 func (p *ParamBuilder) CopyTo() *ParamBuilder {
-	p.spec.DoCopyTo = true
+	p.Spec.DoCopyTo = true
 	return p
 }
 
 // CopyBack sets device→host copy after kernel execution
 func (p *ParamBuilder) CopyBack() *ParamBuilder {
-	p.spec.DoCopyBack = true
+	p.Spec.DoCopyBack = true
 	return p
 }
 
 // NoCopy explicitly disables data movement
 func (p *ParamBuilder) NoCopy() *ParamBuilder {
-	p.spec.DoCopyTo = false
-	p.spec.DoCopyBack = false
+	p.Spec.DoCopyTo = false
+	p.Spec.DoCopyBack = false
 	return p
 }
 
 // Convert sets type conversion during copy operations
-func (p *ParamBuilder) Convert(toType builder.DataType) *ParamBuilder {
-	p.spec.ConvertType = toType
+func (p *ParamBuilder) Convert(toType DataType) *ParamBuilder {
+	p.Spec.ConvertType = toType
 	return p
 }
 
 // Type sets explicit type (mainly for Temp arrays)
-func (p *ParamBuilder) Type(dataType builder.DataType) *ParamBuilder {
-	p.spec.DataType = dataType
+func (p *ParamBuilder) Type(dataType DataType) *ParamBuilder {
+	p.Spec.DataType = dataType
 	return p
 }
 
 // Size sets explicit size (mainly for Temp arrays)
 func (p *ParamBuilder) Size(elements int) *ParamBuilder {
-	p.spec.Size = int64(elements)
+	p.Spec.Size = int64(elements)
 	return p
 }
 
 // ToMatrix marks this parameter as a matrix, enabling MATMUL macro generation
 func (p *ParamBuilder) ToMatrix() *ParamBuilder {
-	p.spec.IsMatrix = true
+	p.Spec.IsMatrix = true
 
 	// If bound to a mat.Matrix, extract dimensions
-	if p.spec.HostBinding != nil {
-		if m, ok := p.spec.HostBinding.(mat.Matrix); ok {
-			p.spec.MatrixRows, p.spec.MatrixCols = m.Dims()
+	if p.Spec.HostBinding != nil {
+		if m, ok := p.Spec.HostBinding.(mat.Matrix); ok {
+			p.Spec.MatrixRows, p.Spec.MatrixCols = m.Dims()
 		}
 	}
 
@@ -169,76 +168,76 @@ func (p *ParamBuilder) ToMatrix() *ParamBuilder {
 
 // Static marks a matrix for static embedding (const array in kernel)
 func (p *ParamBuilder) Static() *ParamBuilder {
-	p.spec.IsStatic = true
+	p.Spec.IsStatic = true
 	return p
 }
 
 // Stride sets the stride for promoting flat arrays to matrices
 func (p *ParamBuilder) Stride(stride int) *ParamBuilder {
-	p.spec.Stride = stride
-	p.spec.MatrixRows = int(p.spec.Size) / stride
-	p.spec.MatrixCols = stride
+	p.Spec.Stride = stride
+	p.Spec.MatrixRows = int(p.Spec.Size) / stride
+	p.Spec.MatrixCols = stride
 	return p
 }
 
 // Align sets memory alignment requirements
-func (p *ParamBuilder) Align(alignment builder.AlignmentType) *ParamBuilder {
-	p.spec.Alignment = alignment
+func (p *ParamBuilder) Align(alignment AlignmentType) *ParamBuilder {
+	p.Spec.Alignment = alignment
 	return p
 }
 
 // inferFromBinding extracts type and size information from the host binding
 func (p *ParamBuilder) inferFromBinding() {
-	if p.spec.HostBinding == nil {
+	if p.Spec.HostBinding == nil {
 		return
 	}
 
-	v := reflect.ValueOf(p.spec.HostBinding)
+	v := reflect.ValueOf(p.Spec.HostBinding)
 	t := v.Type()
 
 	// Handle slices
 	if t.Kind() == reflect.Slice {
-		p.spec.Size = int64(v.Len())
+		p.Spec.Size = int64(v.Len())
 
 		// Infer element type
 		elemType := t.Elem()
 		switch elemType.Kind() {
 		case reflect.Float32:
-			p.spec.DataType = builder.Float32
+			p.Spec.DataType = Float32
 		case reflect.Float64:
-			p.spec.DataType = builder.Float64
+			p.Spec.DataType = Float64
 		case reflect.Int32:
-			p.spec.DataType = builder.INT32
+			p.Spec.DataType = INT32
 		case reflect.Int64:
-			p.spec.DataType = builder.INT64
+			p.Spec.DataType = INT64
 		}
 		return
 	}
 
 	// Handle mat.Matrix
-	if m, ok := p.spec.HostBinding.(mat.Matrix); ok {
+	if m, ok := p.Spec.HostBinding.(mat.Matrix); ok {
 		rows, cols := m.Dims()
-		p.spec.Size = int64(rows * cols)
-		p.spec.DataType = builder.Float64 // gonum matrices are float64
-		p.spec.MatrixRows = rows
-		p.spec.MatrixCols = cols
+		p.Spec.Size = int64(rows * cols)
+		p.Spec.DataType = Float64 // gonum matrices are float64
+		p.Spec.MatrixRows = rows
+		p.Spec.MatrixCols = cols
 		return
 	}
 
 	// Handle scalars
 	switch t.Kind() {
 	case reflect.Float32:
-		p.spec.DataType = builder.Float32
-		p.spec.Size = 1
+		p.Spec.DataType = Float32
+		p.Spec.Size = 1
 	case reflect.Float64:
-		p.spec.DataType = builder.Float64
-		p.spec.Size = 1
+		p.Spec.DataType = Float64
+		p.Spec.Size = 1
 	case reflect.Int, reflect.Int64:
-		p.spec.DataType = builder.INT64
-		p.spec.Size = 1
+		p.Spec.DataType = INT64
+		p.Spec.Size = 1
 	case reflect.Int32:
-		p.spec.DataType = builder.INT32
-		p.spec.Size = 1
+		p.Spec.DataType = INT32
+		p.Spec.Size = 1
 	}
 }
 
@@ -312,7 +311,7 @@ func (p *ParamSpec) NeedsCopyBack() bool {
 }
 
 // GetEffectiveType returns the type to use on device (considering conversion)
-func (p *ParamSpec) GetEffectiveType() builder.DataType {
+func (p *ParamSpec) GetEffectiveType() DataType {
 	if p.ConvertType != 0 {
 		return p.ConvertType
 	}

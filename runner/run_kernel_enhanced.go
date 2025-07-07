@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
 	"reflect"
 )
@@ -96,7 +97,7 @@ func (kr *Runner) buildKernelArguments(def *KernelDefinition, scalarValues []int
 
 	// Add arrays
 	for _, p := range def.Parameters {
-		if p.Direction == DirectionScalar || (p.IsMatrix && !p.IsStatic) {
+		if p.Direction == builder.DirectionScalar || (p.IsMatrix && !p.IsStatic) {
 			continue
 		}
 
@@ -116,7 +117,7 @@ func (kr *Runner) buildKernelArguments(def *KernelDefinition, scalarValues []int
 	// Add scalars - match them with parameter definitions
 	scalarIndex := 0
 	for _, p := range def.Parameters {
-		if p.Direction == DirectionScalar {
+		if p.Direction == builder.DirectionScalar {
 			if scalarIndex >= len(scalarValues) {
 				// Try to get value from binding
 				if p.HostBinding != nil {
