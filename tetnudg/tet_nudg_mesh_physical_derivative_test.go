@@ -70,17 +70,18 @@ func TestTetNudgMatCopy(t *testing.T) {
 	)
 
 	// Define kernel with all parameters
-	err := kp.DefineKernel("differentiate", params...)
+	kernelName := "differentiate"
+	err := kp.DefineKernel(kernelName, params...)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
 	}
 
 	// Get signature and build kernel
-	signature, _ := kp.GetKernelSignature("differentiate")
+	signature, _ := kp.GetKernelSignature(kernelName)
 	kernelSource := fmt.Sprintf(`
 #define NP %d
 
-@kernel void differentiate(%s) {
+@kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
         const real_t* U = U_PART(part);
         real_t* Ur = Ur_PART(part);
@@ -94,14 +95,14 @@ func TestTetNudgMatCopy(t *testing.T) {
 		}
     }
 }
-`, tn.Np, signature, props.ShortName)
+`, tn.Np, kernelName, signature, props.ShortName)
 
-	_, err = kp.BuildKernel(kernelSource, "differentiate")
+	_, err = kp.BuildKernel(kernelSource, kernelName)
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 	// Execute differentiation
-	err = kp.RunKernel("differentiate")
+	err = kp.RunKernel(kernelName)
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
@@ -189,17 +190,18 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	)
 
 	// Define kernel with all parameters
-	err := kp.DefineKernel("differentiate", params...)
+	kernelName := "differentiate"
+	err := kp.DefineKernel(kernelName, params...)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
 	}
 
 	// Get signature and build kernel
-	signature, _ := kp.GetKernelSignature("differentiate")
+	signature, _ := kp.GetKernelSignature(kernelName)
 	kernelSource := fmt.Sprintf(`
 #define NP %d
 
-@kernel void differentiate(%s) {
+@kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
         const real_t* U = U_PART(part);
         real_t* Ur = Ur_PART(part);
@@ -229,15 +231,15 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		}
     }
 }
-`, tn.Np, signature,
+`, tn.Np, kernelName, signature,
 		props.ShortName, props.ShortName, props.ShortName)
 
-	_, err = kp.BuildKernel(kernelSource, "differentiate")
+	_, err = kp.BuildKernel(kernelSource, kernelName)
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 	// Execute differentiation
-	err = kp.RunKernel("differentiate")
+	err = kp.RunKernel(kernelName)
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}

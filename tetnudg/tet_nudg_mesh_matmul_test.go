@@ -6,6 +6,7 @@ import (
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/DGKernel/utils"
 	"github.com/stretchr/testify/assert"
+	"gonum.org/v1/gonum/mat"
 	"testing"
 )
 
@@ -28,10 +29,13 @@ func TestTetNudgMatmul(t *testing.T) {
 	defer kp.Free()
 
 	// Initialize test data
-	Ur := make([]float64, totalNodes)
-	U := make([]float64, totalNodes)
-	for i := range U {
-		U[i] = 2. * float64(i%10)
+	// Ur := make([]float64, totalNodes)
+	Ur := mat.NewDense(Np, Ktot, nil)
+	U := mat.NewDense(Np, Ktot, nil)
+	for K := 0; K < Ktot; K++ {
+		for j := 0; j < Np; j++ {
+			U.Set(j, K, 2.*float64(j%10))
+		}
 	}
 
 	// Collect all matrices into param builders
@@ -40,7 +44,6 @@ func TestTetNudgMatmul(t *testing.T) {
 
 	// Add matrices as parameters
 	for name, mat := range matrices {
-		fmt.Printf("%s\n", name)
 		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
 	}
 
@@ -51,33 +54,33 @@ func TestTetNudgMatmul(t *testing.T) {
 	)
 
 	// Define kernel with all parameters
-	err := kp.DefineKernel("differentiate", params...)
+	kernelName := "differentiate"
+	err := kp.DefineKernel(kernelName, params...)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
 	}
 
 	// Get signature and build kernel
-	signature, _ := kp.GetKernelSignature("differentiate")
+	signature, _ := kp.GetKernelSignature(kernelName)
 	kernelSource := fmt.Sprintf(`
-@kernel void differentiate(%s) {
+@kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
         const real_t* U = U_PART(part);
         real_t* Ur = Ur_PART(part);
         MATMUL_Dr_%s(U, Ur, K[part]);
     }
 }
-`, signature, props.ShortName)
+`, kernelName, signature, props.ShortName)
 
-	_, err = kp.BuildKernel(kernelSource, "differentiate")
+	_, err = kp.BuildKernel(kernelSource, kernelName)
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 	// Execute differentiation
-	err = kp.RunKernel("differentiate")
+	err = kp.RunKernel(kernelName)
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
-
 	expected := make([]float64, totalNodes)
 	for i := range expected {
 		expected[i] = 1.
