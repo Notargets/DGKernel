@@ -11,6 +11,102 @@ import (
 	"testing"
 )
 
+func TestTetNudgMatCopy(t *testing.T) {
+	// TODO: The issue this test has surfaced is that golang is ROW-MAJOR
+	//  storage of matrices, where all numerical libraries are COLUMN-MAJOR
+	//  We need to implement COLUMN-MAJOR in the DGKernel code because the
+	//  partitions need to be stored contiguously for us to slice them.
+	//  We will need to automatically transpose matrices when copying from
+	//  the host to device to implement the required COLUMN-MAJOR format.
+	//  We'll keep arrays unchanged,
+	//  and make notes so that a user will need to implement COLUMN-MAJOR
+	//  when flattening matrices into slices on the host before tranferring
+	//  to the device. This will perform optimally on host,
+	//  and allow for natural zero copy manipulation of partitions for
+	//  parallelism.
+	order := 1
+	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
+	Np := tn.Np
+	Ktot := tn.K
+	totalNodes := Np * Ktot
+	props := tn.GetProperties()
+
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	k := []int{Ktot}
+	kp := runner.NewRunner(device, builder.Config{
+		K:         k,
+		FloatType: builder.Float64,
+	})
+	defer kp.Free()
+
+	// Collect all matrices into param builders
+	matrices := tn.GetRefMatrices()
+	params := make([]*runner.ParamBuilder, 0, len(matrices)+2)
+
+	// Add matrices as parameters
+	for name, mat := range matrices {
+		params = append(params, runner.Input(name).Bind(mat).ToMatrix())
+	}
+
+	U := mat.NewDense(Np, Ktot, nil)
+	fOrder := float64(order)
+	for K := 0; K < Ktot; K++ {
+		for j := 0; j < Np; j++ {
+			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
+			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
+			U.Set(j, K, xP+yP+zP)
+		}
+	}
+
+	Dx := make([]float64, totalNodes)
+	// Add array parameters
+	params = append(params,
+		runner.Input("U").Bind(U).CopyTo(),
+		runner.Input("Rx").Bind(tn.Rx).CopyTo(),
+		runner.Output("Dx").Bind(Dx).CopyBack(),
+		runner.Temp("Ur").Type(builder.Float64).Size(totalNodes),
+	)
+
+	// Define kernel with all parameters
+	err := kp.DefineKernel("differentiate", params...)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
+	}
+
+	// Get signature and build kernel
+	signature, _ := kp.GetKernelSignature("differentiate")
+	kernelSource := fmt.Sprintf(`
+#define NP %d
+
+@kernel void differentiate(%s) {
+    for (int part = 0; part < NPART; ++part; @outer) {
+        const real_t* U = U_PART(part);
+        real_t* Ur = Ur_PART(part);
+        MATMUL_Dr_%s(U, Ur, K[part]);
+
+        real_t* Dx = Dx_PART(part);
+        const real_t* Rx = Rx_PART(part);
+		// Single partition means we can safely use KpartMax as K[part]
+		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
+			Dx[i] = Rx[i]*Ur[i];
+		}
+    }
+}
+`, tn.Np, signature, props.ShortName)
+
+	_, err = kp.BuildKernel(kernelSource, "differentiate")
+	if err != nil {
+		t.Fatalf("Failed to build kernel: %v", err)
+	}
+	// Execute differentiation
+	err = kp.RunKernel("differentiate")
+	if err != nil {
+		t.Fatalf("Kernel execution failed: %v", err)
+	}
+}
+
 func TestTetNudgPhysicalDerivative(t *testing.T) {
 	// TODO: The issue this test has surfaced is that golang is ROW-MAJOR
 	//  storage of matrices, where all numerical libraries are COLUMN-MAJOR
@@ -74,16 +170,16 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	Dz := make([]float64, totalNodes)
 	// Add array parameters
 	params = append(params,
-		runner.Input("U").Bind(U).ToMatrix().CopyTo(),
-		runner.Input("Rx").Bind(tn.Rx).ToMatrix().CopyTo(),
-		runner.Input("Sx").Bind(tn.Sx).ToMatrix().CopyTo(),
-		runner.Input("Tx").Bind(tn.Tx).ToMatrix().CopyTo(),
-		runner.Input("Ry").Bind(tn.Ry).ToMatrix().CopyTo(),
-		runner.Input("Sy").Bind(tn.Sy).ToMatrix().CopyTo(),
-		runner.Input("Ty").Bind(tn.Ty).ToMatrix().CopyTo(),
-		runner.Input("Rz").Bind(tn.Rz).ToMatrix().CopyTo(),
-		runner.Input("Sz").Bind(tn.Sz).ToMatrix().CopyTo(),
-		runner.Input("Tz").Bind(tn.Tz).ToMatrix().CopyTo(),
+		runner.Input("U").Bind(U).CopyTo(),
+		runner.Input("Rx").Bind(tn.Rx).CopyTo(),
+		runner.Input("Sx").Bind(tn.Sx).CopyTo(),
+		runner.Input("Tx").Bind(tn.Tx).CopyTo(),
+		runner.Input("Ry").Bind(tn.Ry).CopyTo(),
+		runner.Input("Sy").Bind(tn.Sy).CopyTo(),
+		runner.Input("Ty").Bind(tn.Ty).CopyTo(),
+		runner.Input("Rz").Bind(tn.Rz).CopyTo(),
+		runner.Input("Sz").Bind(tn.Sz).CopyTo(),
+		runner.Input("Tz").Bind(tn.Tz).CopyTo(),
 		runner.Output("Dx").Bind(Dx).CopyBack(),
 		runner.Output("Dy").Bind(Dy).CopyBack(),
 		runner.Output("Dz").Bind(Dz).CopyBack(),
@@ -150,12 +246,15 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
 
 	_, _, _ = DxH, DyH, DzH
-	assert.InDeltaSlicef(t, UxExpected, DxH, 1.e-8, "")
-	assert.InDeltaSlicef(t, UyExpected, DyH, 1.e-8, "")
-	assert.InDeltaSlicef(t, UzExpected, DzH, 1.e-8, "")
+	assert.InDeltaSlicef(t, UxExpected.RawMatrix().Data, DxH, 1.e-8, "")
+	assert.InDeltaSlicef(t, UyExpected.RawMatrix().Data, DyH, 1.e-8, "")
+	assert.InDeltaSlicef(t, UzExpected.RawMatrix().Data, DzH, 1.e-8, "")
 	fmt.Println("Host calculation of physical derivative validates")
 
-	assert.InDeltaSlicef(t, UxExpected, Dx, 1.e-8, "")
+	assert.InDeltaSlicef(t, UxExpected.RawMatrix().Data, Dx, 1.e-8, "")
+	assert.InDeltaSlicef(t, UyExpected.RawMatrix().Data, Dy, 1.e-8, "")
+	assert.InDeltaSlicef(t, UzExpected.RawMatrix().Data, Dz, 1.e-8, "")
+	fmt.Println("Device calculation of physical derivative validates")
 }
 
 func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,

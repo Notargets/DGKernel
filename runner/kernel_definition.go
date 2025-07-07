@@ -297,6 +297,22 @@ func (kr *Runner) copyToDeviceWithConversion(spec *ParamSpec) error {
 		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
 	case []int64:
 		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+		// Add this case to the type switch in copyToDeviceWithConversion method in runner/kernel_definition.go
+	case mat.Matrix:
+		// Handle mat.Matrix as a flat array
+		rows, cols := data.Dims()
+		size := rows * cols
+
+		// Extract matrix data as a flat array (column-major)
+		flatData := make([]float64, size)
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				// Column-major: column j, row i goes to position j*rows + i
+				flatData[j*rows+i] = data.At(i, j)
+			}
+		}
+		// Copy the flattened data to device
+		mem.CopyFrom(unsafe.Pointer(&flatData[0]), int64(size*8))
 	default:
 		return fmt.Errorf("unsupported type for copy: %T", data)
 	}
