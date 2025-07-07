@@ -2,11 +2,8 @@ package runner
 
 import (
 	"fmt"
-	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
-	"gonum.org/v1/gonum/mat"
 	"reflect"
-	"unsafe"
 )
 
 // RunKernelEnhanced executes a kernel defined with DefineKernel
@@ -148,107 +145,6 @@ func (kr *Runner) getScalarValue(binding interface{}) interface{} {
 
 	// Return the actual value
 	return v.Interface()
-}
-
-// copyFromDeviceWithConversion handles device→host copy with optional type conversion
-func (kr *Runner) copyFromDeviceWithConversion(spec *ParamSpec) error {
-	mem := kr.GetMemory(spec.Name)
-	if mem == nil {
-		return fmt.Errorf("memory for %s not found", spec.Name)
-	}
-
-	// For now, use the existing CopyArrayToHost for full arrays
-	// This would be enhanced to handle partial copies and conversions
-
-	hostBinding := spec.HostBinding
-	if hostBinding == nil {
-		// Try to get from stored bindings
-		if binding, exists := kr.hostBindings[spec.Name]; exists {
-			hostBinding = binding
-		} else {
-			return fmt.Errorf("no host binding for %s", spec.Name)
-		}
-	}
-
-	// Get total size
-	totalSize := spec.Size * sizeOfType(spec.GetEffectiveType())
-
-	// Handle type conversion if needed
-	if spec.ConvertType != 0 && spec.ConvertType != spec.DataType {
-		// Perform conversion during copy back
-		return kr.copyFromDeviceWithTypeConversion(mem, hostBinding, spec.ConvertType, spec.DataType, totalSize)
-	}
-
-	// Direct copy based on type
-	switch data := hostBinding.(type) {
-	case []float32:
-		mem.CopyTo(unsafe.Pointer(&data[0]), totalSize)
-	case []float64:
-		mem.CopyTo(unsafe.Pointer(&data[0]), totalSize)
-	case []int32:
-		mem.CopyTo(unsafe.Pointer(&data[0]), totalSize)
-	case []int64:
-		mem.CopyTo(unsafe.Pointer(&data[0]), totalSize)
-	case mat.Matrix:
-		// Handle mat.Matrix for copy back
-		rows, cols := data.Dims()
-		size := rows * cols
-
-		// Create temporary buffer to receive device data
-		flatData := make([]float64, size)
-		mem.CopyTo(unsafe.Pointer(&flatData[0]), totalSize)
-
-		// Type assert to a mutable matrix type
-		switch m := data.(type) {
-		case *mat.Dense:
-			// Unpack column-major data back into the Dense matrix
-			for i := 0; i < rows; i++ {
-				for j := 0; j < cols; j++ {
-					// Column-major: position j*rows + i contains element (i,j)
-					val := flatData[j*rows+i]
-					m.Set(i, j, val)
-				}
-			}
-		}
-	default:
-		return fmt.Errorf("unsupported type for copy: %T", data)
-	}
-
-	return nil
-}
-
-// copyFromDeviceWithTypeConversion performs type conversion during device→host copy
-func (kr *Runner) copyFromDeviceWithTypeConversion(deviceMem *gocca.OCCAMemory, hostData interface{},
-	fromType, toType builder.DataType, totalSize int64) error {
-	// This is a simplified example - full implementation would handle all conversions
-	switch fromType {
-	case builder.Float32:
-		if toType == builder.Float64 {
-			// Device has float32, host wants float64
-			temp := make([]float32, totalSize/4)
-			deviceMem.CopyTo(unsafe.Pointer(&temp[0]), totalSize)
-
-			dst := hostData.([]float64)
-			for i, v := range temp {
-				dst[i] = float64(v)
-			}
-			return nil
-		}
-	case builder.Float64:
-		if toType == builder.Float32 {
-			// Device has float64, host wants float32
-			temp := make([]float64, totalSize/8)
-			deviceMem.CopyTo(unsafe.Pointer(&temp[0]), totalSize)
-
-			dst := hostData.([]float32)
-			for i, v := range temp {
-				dst[i] = float32(v)
-			}
-			return nil
-		}
-	}
-
-	return fmt.Errorf("unsupported conversion from %v to %v", fromType, toType)
 }
 
 // BuildKernelFromDefinition builds a kernel using stored parameter definitions

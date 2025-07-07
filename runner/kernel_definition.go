@@ -3,10 +3,8 @@ package runner
 import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
-	"github.com/notargets/gocca"
 	"gonum.org/v1/gonum/mat"
 	"strings"
-	"unsafe"
 )
 
 // KernelDefinition holds all information about a defined kernel
@@ -272,84 +270,6 @@ func (kr *Runner) generateSignatureFromParams(params []ParamSpec) string {
 	}
 
 	return strings.Join(parts, ",\n\t")
-}
-
-// copyToDeviceWithConversion handles host→device copy with optional type conversion
-func (kr *Runner) copyToDeviceWithConversion(spec *ParamSpec) error {
-	mem := kr.GetMemory(spec.Name)
-	if mem == nil {
-		return fmt.Errorf("memory for %s not found", spec.Name)
-	}
-
-	// Handle type conversion if needed
-	if spec.ConvertType != 0 && spec.ConvertType != spec.DataType {
-		// Perform conversion during copy
-		return kr.copyWithTypeConversion(spec.HostBinding, mem, spec.DataType, spec.ConvertType)
-	}
-
-	// Direct copy based on type
-	switch data := spec.HostBinding.(type) {
-	case []float32:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
-	case []float64:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-	case []int32:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
-	case []int64:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-		// Add this case to the type switch in copyToDeviceWithConversion method in runner/kernel_definition.go
-	case mat.Matrix:
-		// Handle mat.Matrix as a flat array
-		rows, cols := data.Dims()
-		size := rows * cols
-
-		// Extract matrix data as a flat array (column-major)
-		flatData := make([]float64, size)
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				// Column-major: column j, row i goes to position j*rows + i
-				flatData[j*rows+i] = data.At(i, j)
-			}
-		}
-		// Copy the flattened data to device
-		mem.CopyFrom(unsafe.Pointer(&flatData[0]), int64(size*8))
-	default:
-		return fmt.Errorf("unsupported type for copy: %T", data)
-	}
-
-	return nil
-}
-
-// copyWithTypeConversion performs type conversion during copy
-func (kr *Runner) copyWithTypeConversion(hostData interface{}, deviceMem *gocca.OCCAMemory,
-	fromType, toType builder.DataType) error {
-	// This is a simplified example - full implementation would handle all conversions
-	switch fromType {
-	case builder.Float64:
-		if toType == builder.Float32 {
-			// Convert float64 → float32
-			src := hostData.([]float64)
-			dst := make([]float32, len(src))
-			for i, v := range src {
-				dst[i] = float32(v)
-			}
-			deviceMem.CopyFrom(unsafe.Pointer(&dst[0]), int64(len(dst)*4))
-			return nil
-		}
-	case builder.Float32:
-		if toType == builder.Float64 {
-			// Convert float32 → float64
-			src := hostData.([]float32)
-			dst := make([]float64, len(src))
-			for i, v := range src {
-				dst[i] = float64(v)
-			}
-			deviceMem.CopyFrom(unsafe.Pointer(&dst[0]), int64(len(dst)*8))
-			return nil
-		}
-	}
-
-	return fmt.Errorf("unsupported conversion from %v to %v", fromType, toType)
 }
 
 // sizeOfType returns the size in bytes of a data type
