@@ -2,383 +2,273 @@
 
 ## Overview
 
-This document specifies the design for a gather/scatter array indexing system that enables efficient inter-partition data communication. The system computes entity-level pick and place indices on the host (golang) that kernels use to transfer data between partitions.
+This document specifies a gather/scatter index building system for inter-partition data communication. The system operates in two distinct phases:
+1. **Build Phase**: Uses mesh connectivity to compute pick/place indices
+2. **Runtime Phase**: Uses only the computed indices for data transfer
 
 ## Core Concepts
 
-### Partitions and Elements
-- Computational domain divided into `Npart` partitions
-- Each partition contains elements of potentially different types/orders
-- Elements are numbered locally within each partition (0 to K[part]-1)
-
-### Arrays
-An **Array** represents entity data for a specific element type/order combination:
-- Fixed stride throughout the array (all entities have same point count)
-- Organized as: element → entity → points
-- Examples: "P3_Hex_Face_Array", "P2_Tet_Edge_Array"
+### Partitions and Arrays
+- Domain divided into `Npart` partitions
+- Each partition has arrays of entity data (faces, edges, vertices)
+- Arrays use local element numbering (0 to K[part]-1)
+- Fixed stride per array (all entities have same point count)
 
 ### Entity-Level Indexing
-- **Pick indices**: Point to start of entities in sender's M array
-- **Place indices**: Point to start of entities in receiver's P array
-- One index per entity (not per point)
+- **Pick indices**: Point to start of entities to gather from sender's array
+- **Place indices**: Point to start of entities to scatter into receiver's array
+- One index per entity, not per point
 
-### M and P Arrays
-- **M array**: "Minus" values - this element's entity values
-- **P array**: "Plus" values - neighbor's values (local, BC, or remote)
+## Build Phase
 
-## Design Principles
+### Inputs
 
-1. **Fixed Stride per Array**: Each Array has uniform entity sizes
-2. **Type Safety**: Arrays only communicate with compatible Arrays
-3. **Entity-Level Operations**: Indices point to entity starts, not individual points
-4. **Local Coordinates**: All indices use partition-local element numbering
-
-## Core Data Structures
-
-### Reference Geometry
-Provides entity point groupings for each element type:
 ```go
-type ReferenceGeometry struct {
-    R, S, T        []float64   // Node coordinates (length Np)
-    VertexPoints   []int       // Indices of vertex nodes
-    EdgePoints     [][]int     // [edge][indices] - nodes on each edge
-    FacePoints     [][]int     // [face][indices] - nodes on each face
-    InteriorPoints []int       // Interior node indices
-}
-```
-
-### Array Definition
-```go
-type Array struct {
-    Name           string      // e.g., "P3_Hex_Face_M"
-    ElementType    ElementType // Hex, Tet, Prism, etc.
-    Order          int         // Polynomial order
-    EntityType     EntityType  // Face, Edge, Vertex
-    
-    // Fixed sizes for this array
-    ElementsPerPartition []int  // [partition] → number of elements
-    EntitiesPerElement   int    // e.g., 6 faces per hex
-    PointsPerEntity      int    // e.g., 16 points per P3 face
-    
-    // Total stride per element
-    StridePerElement     int    // = EntitiesPerElement × PointsPerEntity
-}
-
-// Entity location within the array (fixed stride)
-func (a *Array) Locate(localElementID, entityID int) int {
-    return localElementID * a.StridePerElement + entityID * a.PointsPerEntity
-}
-```
-
-### Connectivity Structures (Global IDs)
-```go
+// Mesh connectivity (global element IDs)
 type ElementConnectivity struct {
-    EToE mat.Matrix  // [K × NFaces] Element k, face f connects to element EToE[k,f]
-    EToF mat.Matrix  // [K × NFaces] Element k, face f connects to face EToF[k,f]
-    BCType mat.Matrix // [K × NFaces] Boundary type (-1 for interior)
+    EToE   [][]int  // [elem][face] → neighbor element
+    EToF   [][]int  // [elem][face] → neighbor's face
+    BCType [][]int  // [elem][face] → BC type (-1 for interior)
 }
 
-type PartitionMapping struct {
-    EToP []int // [globalElementID] → partitionID
+// Partitioning information
+type PartitionInfo struct {
+    EToP           []int   // [globalElem] → partition
+    PartitionElems [][]int // [partition] → list of global elements
+    K              []int   // [partition] → number of elements (computed during build)
+}
+
+// Array specification
+type ArraySpec struct {
+    Name               string
+    EntitiesPerElement int    // e.g., 6 faces per hex
+    PointsPerEntity    int    // e.g., 16 points per P3 face
 }
 ```
 
-### ID Translation
+### Build Algorithm
+
+The builder iterates through each partition's elements in local order, determining communication needs:
+
 ```go
-type PartitionLayout struct {
-    PartitionID   int
-    LocalToGlobal []int         // [localID] → globalID
-    GlobalToLocal map[int]int   // globalID → localID (or -1)
+func BuildIndices(
+    conn *ElementConnectivity,
+    partInfo *PartitionInfo,
+    arraySpec *ArraySpec,
+    partitionID int,
+) *GatherScatterIndices {
+    
+    // Get this partition's elements
+    globalElems := partInfo.PartitionElems[partitionID]
+    numLocalElems := len(globalElems)
+    
+    // Temporary storage for indices by source partition
+    pickBySource := make(map[int][]int32)
+    placeBySource := make(map[int][]int32)
+    
+    // Iterate in local element order
+    for localElem := 0; localElem < numLocalElems; localElem++ {
+        globalElem := globalElems[localElem]
+        
+        for entity := 0; entity < arraySpec.EntitiesPerElement; entity++ {
+            neighbor := conn.EToE[globalElem][entity]
+            
+            // Skip boundaries and local neighbors
+            if neighbor == globalElem {
+                continue // Boundary
+            }
+            if partInfo.EToP[neighbor] == partitionID {
+                continue // Local neighbor
+            }
+            
+            // Remote neighbor - need pick/place indices
+            remotePart := partInfo.EToP[neighbor]
+            remoteEntity := conn.EToF[globalElem][entity]
+            
+            // Find neighbor's local position in remote partition
+            remoteLocalElem := findLocalIndex(neighbor, partInfo.PartitionElems[remotePart])
+            
+            // Compute array locations
+            pickLoc := computeEntityLocation(remoteLocalElem, remoteEntity, arraySpec)
+            placeLoc := computeEntityLocation(localElem, entity, arraySpec)
+            
+            pickBySource[remotePart] = append(pickBySource[remotePart], int32(pickLoc))
+            placeBySource[remotePart] = append(placeBySource[remotePart], int32(placeLoc))
+        }
+    }
+    
+    // Concatenate into final arrays
+    return concatenateBySource(pickBySource, placeBySource, partInfo.NumPartitions)
+}
+
+func computeEntityLocation(elemID, entityID int, spec *ArraySpec) int {
+    return elemID * spec.EntitiesPerElement * spec.PointsPerEntity + 
+           entityID * spec.PointsPerEntity
+}
+
+func findLocalIndex(globalElem int, partitionElems []int) int {
+    for i, elem := range partitionElems {
+        if elem == globalElem {
+            return i
+        }
+    }
+    panic("element not found in partition")
 }
 ```
 
-### Index Storage
+### Output Structure
+
 ```go
 type GatherScatterIndices struct {
-    PartitionID int
-    ArrayName   string  // Which array these indices are for
+    // Entity-level indices (point to entity starts)
+    PickIndices  []int32  // All pick indices concatenated
+    PickOffsets  []int32  // [Npart+1] Start position per source
+    PlaceIndices []int32  // All place indices concatenated
+    PlaceOffsets []int32  // [Npart+1] Start position per source
     
-    // Entity-level indices (one per entity, not per point)
-    PickIndices  []int32  // Concatenated for all source partitions
-    PickOffsets  []int32  // [Npart+1] Starting position per source
-    PickCounts   []int32  // [Npart] Number of entities per source
-    
-    PlaceIndices []int32  // Concatenated for all source partitions
-    PlaceOffsets []int32  // [Npart+1] Starting position per source
-    PlaceCounts  []int32  // [Npart] Number of entities per source
+    // Metadata
+    PointsPerEntity int
+    PartitionID     int
+}
+
+// Builder retains partition information
+type IndexBuilder struct {
+    K []int  // [partition] → number of elements per partition
+    // Other builder state...
 }
 ```
 
-## Array Construction Process
+## Runtime Phase
 
-Arrays are built by scanning through connectivity to determine data sources:
+At runtime, only the indices and array data are needed:
 
-### 1. P Array Construction Algorithm
-
-For each partition, iterate through elements and entities to build the P array structure:
-
+### Send Buffer Packing
 ```go
-func BuildPArray(
-    partition int,
-    array *Array,
-    connectivity *ElementConnectivity,
-    partMapping *PartitionMapping,
-    layout map[int]*PartitionLayout,
-) *GatherScatterIndices {
-    
-    indices := &GatherScatterIndices{
-        PartitionID: partition,
-        ArrayName:   array.Name,
-    }
-    
-    // Temporary storage per source partition
-    pickMap := make(map[int][]int32)
-    placeMap := make(map[int][]int32)
-    
-    // Current position in P array as we iterate
-    pArrayPosition := 0
-    
-    // Iterate through array in order
-    for localElem := 0; localElem < array.ElementsPerPartition[partition]; localElem++ {
-        globalElem := layout[partition].LocalToGlobal[localElem]
-        
-        for entity := 0; entity < array.EntitiesPerElement; entity++ {
-            neighbor := connectivity.EToE.At(globalElem, entity)
-            neighborEntity := connectivity.EToF.At(globalElem, entity)
-            
-            if neighbor == globalElem {
-                // Boundary face - P array will use BC
-                // No pick/place indices needed
-            } else if partMapping.EToP[neighbor] == partition {
-                // Local neighbor - P array points to local M
-                // No pick/place indices needed (handled in kernel)
-            } else {
-                // Remote neighbor - needs pick/place indices
-                remotePart := partMapping.EToP[neighbor]
-                remoteLocal := layout[remotePart].GlobalToLocal[neighbor]
-                
-                // Pick from remote M array at entity start
-                remoteArray := getRemoteMArray(array, remotePart)
-                pickLocation := remoteArray.Locate(remoteLocal, neighborEntity)
-                
-                pickMap[remotePart] = append(pickMap[remotePart], int32(pickLocation))
-                placeMap[remotePart] = append(placeMap[remotePart], int32(pArrayPosition))
-            }
-            
-            // Move to next entity position in P array
-            pArrayPosition += array.PointsPerEntity
-        }
-    }
-    
-    // Concatenate indices with offsets
-    return concatenateIndices(indices, pickMap, placeMap)
-}
-```
-
-### 2. Index Concatenation
-
-```go
-func concatenateIndices(
+func PackSendBuffer(
     indices *GatherScatterIndices,
-    pickMap, placeMap map[int][]int32,
-) *GatherScatterIndices {
+    sourceArray []float64,
+    targetPartition int,
+) []float64 {
+    start := indices.PickOffsets[targetPartition]
+    end := indices.PickOffsets[targetPartition+1]
+    numEntities := end - start
     
-    numPart := len(pickMap) + 1 // Assuming we know total partitions
-    indices.PickOffsets = make([]int32, numPart+1)
-    indices.PlaceOffsets = make([]int32, numPart+1)
-    indices.PickCounts = make([]int32, numPart)
-    indices.PlaceCounts = make([]int32, numPart)
+    sendBuffer := make([]float64, numEntities * indices.PointsPerEntity)
     
-    offset := int32(0)
-    for src := 0; src < numPart; src++ {
-        indices.PickOffsets[src] = offset
-        indices.PlaceOffsets[src] = offset
+    for i := int32(0); i < numEntities; i++ {
+        entityStart := indices.PickIndices[start+i]
+        bufferStart := i * int32(indices.PointsPerEntity)
         
-        if picks, ok := pickMap[src]; ok {
-            indices.PickIndices = append(indices.PickIndices, picks...)
-            indices.PlaceIndices = append(indices.PlaceIndices, placeMap[src]...)
-            indices.PickCounts[src] = int32(len(picks))
-            indices.PlaceCounts[src] = int32(len(picks))
-            offset += int32(len(picks))
+        // Copy entire entity
+        for p := 0; p < indices.PointsPerEntity; p++ {
+            sendBuffer[bufferStart+int32(p)] = sourceArray[entityStart+int32(p)]
         }
     }
-    indices.PickOffsets[numPart] = offset
-    indices.PlaceOffsets[numPart] = offset
     
-    return indices
+    return sendBuffer
 }
 ```
 
-## Usage Example
-
+### Receive Buffer Unpacking
 ```go
-// 1. Define reference elements
-hexP3Ref := &ReferenceGeometry{
-    FacePoints: [][]int{
-        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}, // 16 points per P3 face
-        // ... other faces
-    },
-}
-
-// 2. Define arrays for each element type in each partition
-arrays := make(map[int][]*Array)
-for p := 0; p < nPartitions; p++ {
-    // Count elements by type in this partition
-    hexCount := countElementType(p, HexType)
-    tetCount := countElementType(p, TetType)
+func UnpackReceiveBuffer(
+    indices *GatherScatterIndices,
+    recvBuffer []float64,
+    sourcePartition int,
+    destArray []float64,
+) {
+    start := indices.PlaceOffsets[sourcePartition]
+    end := indices.PlaceOffsets[sourcePartition+1]
+    numEntities := end - start
     
-    if hexCount > 0 {
-        arrays[p] = append(arrays[p], &Array{
-            Name:                 "P3_Hex_Face_M",
-            ElementType:          HexType,
-            Order:                3,
-            EntityType:           Face,
-            ElementsPerPartition: getElementCounts(),
-            EntitiesPerElement:   6,
-            PointsPerEntity:      16,
-            StridePerElement:     6 * 16,
-        })
-    }
-    
-    if tetCount > 0 {
-        arrays[p] = append(arrays[p], &Array{
-            Name:                 "P2_Tet_Face_M",
-            ElementType:          TetType,
-            Order:                2,
-            EntityType:           Face,
-            ElementsPerPartition: getElementCounts(),
-            EntitiesPerElement:   4,
-            PointsPerEntity:      6,
-            StridePerElement:     4 * 6,
-        })
-    }
-}
-
-// 3. Build P arrays and their indices
-for p := 0; p < nPartitions; p++ {
-    for _, array := range arrays[p] {
-        // Create corresponding P array
-        pArray := &Array{
-            Name: strings.Replace(array.Name, "_M", "_P", 1),
-            // ... copy other fields
-        }
+    for i := int32(0); i < numEntities; i++ {
+        entityStart := indices.PlaceIndices[start+i]
+        bufferStart := i * int32(indices.PointsPerEntity)
         
-        indices := BuildPArray(p, pArray, connectivity, partMapping, layouts)
-        // Store indices for device transfer
+        // Copy entire entity
+        for p := 0; p < indices.PointsPerEntity; p++ {
+            destArray[entityStart+int32(p)] = recvBuffer[bufferStart+int32(p)]
+        }
     }
 }
 ```
 
-## Kernel Usage
+## Validation Example
 
-```c
-// Pack send buffer (at sender)
-@kernel void packSendBuffer(const int* pickIndices,
-                           const int* pickOffsets,
-                           const int pointsPerEntity,
-                           const real* mArray,
-                           real* sendBuffer) {
-    
-    for (int tgt = 0; tgt < Npart; ++tgt) {
-        if (tgt == myPartition) continue;
-        
-        const int start = pickOffsets[tgt];
-        const int count = pickOffsets[tgt+1] - start;
-        
-        for (int e = 0; e < count; ++e) {
-            const int entityStart = pickIndices[start + e];
-            
-            // Copy all points of this entity
-            for (int p = 0; p < pointsPerEntity; ++p) {
-                sendBuffer[...] = mArray[entityStart + p];
-            }
-        }
-    }
+A validation application can verify correctness by:
+
+1. **Using the builder to create indices**
+```go
+indices := BuildIndices(conn, partInfo, arraySpec, partitionID)
+```
+
+2. **Creating test data with known values**
+```go
+type FaceCoordinate struct {
+    ElementID int
+    FaceID    int
 }
 
-// Unpack receive buffer (at receiver)
-@kernel void unpackReceiveBuffer(const int* placeIndices,
-                                const int* placeOffsets,
-                                const int pointsPerEntity,
-                                const real* recvBuffer,
-                                real* pArray) {
+// Use K[partitionID] to size the array correctly
+numElems := builder.K[partitionID]
+localFaces := make([]FaceCoordinate, numElems * facesPerElem)
+for elem := 0; elem < numElems; elem++ {
+    for face := 0; face < facesPerElem; face++ {
+        idx := elem * facesPerElem + face
+        localFaces[idx] = FaceCoordinate{elem, face}
+    }
+}
+```
+
+3. **Executing gather/scatter**
+```go
+// Pack, transfer, unpack using the indices
+sendBuffers := PackAllSendBuffers(indices, localFaces)
+// ... transfer ...
+UnpackAllReceiveBuffers(indices, recvBuffers, remoteFaces)
+```
+
+4. **Verifying using original connectivity**
+```go
+// The validation app retained EToE, EToF, EToP to check
+for localElem := 0; localElem < numElems; localElem++ {
+    globalElem := partInfo.PartitionElems[partitionID][localElem]
     
-    for (int src = 0; src < Npart; ++src) {
-        if (src == myPartition) continue;
-        
-        const int start = placeOffsets[src];
-        const int count = placeOffsets[src+1] - start;
-        
-        for (int e = 0; e < count; ++e) {
-            const int entityStart = placeIndices[start + e];
-            
-            // Copy all points of this entity
-            for (int p = 0; p < pointsPerEntity; ++p) {
-                pArray[entityStart + p] = recvBuffer[...];
+    for face := 0; face < facesPerElem; face++ {
+        neighbor := conn.EToE[globalElem][face]
+        if isRemote(neighbor, partitionID, partInfo.EToP) {
+            // Check that remoteFaces contains expected data
+            idx := localElem * facesPerElem + face
+            expected := computeExpectedRemoteFace(neighbor, conn.EToF[globalElem][face])
+            if remoteFaces[idx] != expected {
+                return fmt.Errorf("mismatch at element %d face %d", localElem, face)
             }
         }
     }
 }
 ```
 
-## Mixed Mesh Considerations
+## Key Design Features
 
-### Separate Arrays by Type
-Each element type/order combination has its own set of arrays:
-- No mixing within arrays maintains fixed stride
-- Clear naming convention: "P{order}_{type}_{entity}_{M/P}"
+1. **Clean Phase Separation**: Build phase uses connectivity; runtime uses only indices
+2. **Entity-Level Operations**: Reduces index storage by factor of points_per_entity
+3. **Fixed Stride Arrays**: Enables efficient memory access patterns
+4. **Local Indexing**: All indices reference partition-local array positions
 
-### Mortar Elements
-For interfaces between different element types:
-```go
-type MortarArray struct {
-    LeftArray  *Array  // e.g., P3_Hex_Face
-    RightArray *Array  // e.g., P2_Tet_Face
-    
-    // Interpolation data
-    LeftToMortar  []float64  // Interpolation matrix
-    RightToMortar []float64  // Interpolation matrix
-}
-```
+## Implementation Notes
 
-## Validation
+### Performance
+- Indices are built once, used many times
+- Fixed stride enables vectorization
+- Entity-level copying minimizes index lookups
+- Cache-line alignment for indices improves memory access
 
-```go
-func ValidateIndices(indices *GatherScatterIndices, array *Array) error {
-    // Check entity-level bounds
-    maxEntity := array.ElementsPerPartition[indices.PartitionID] * 
-                 array.EntitiesPerElement
-    
-    for _, idx := range indices.PickIndices {
-        entityIndex := idx / array.PointsPerEntity
-        if entityIndex >= int32(maxEntity) {
-            return fmt.Errorf("pick index out of bounds")
-        }
-    }
-    
-    // Verify counts match
-    for p := 0; p < len(indices.PickCounts); p++ {
-        if indices.PickCounts[p] != indices.PlaceCounts[p] {
-            return fmt.Errorf("mismatched entity counts")
-        }
-    }
-    
-    return nil
-}
-```
+### Mixed Meshes
+- Different element types require separate arrays
+- Each array maintains fixed stride for its type
+- No mixing within arrays ensures predictable performance
 
-## Performance Optimizations
-
-1. **Cache-line alignment**: Align offset boundaries to 64 bytes
-2. **Entity ordering**: Sort by element ID for sequential access
-3. **Prefetch-friendly**: Fixed stride enables hardware prefetching
-4. **Minimal indirection**: Direct entity-level indexing
-
-## Summary
-
-This design provides:
-- Clean separation between mesh connectivity (global) and array indexing (local)
-- Fixed-stride arrays for optimal performance
-- Entity-level indexing to minimize index storage
-- Type-safe array definitions that prevent incompatible communications
-- Natural integration with DG face/edge/vertex operations
+### Error Handling
+- Build phase validates connectivity consistency
+- Runtime assumes indices are correct (validated during build)
+- Bounds checking optional in production for performance
