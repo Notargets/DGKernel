@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gonum.org/v1/gonum/mat"
 	"math"
+	"sort"
 	"testing"
 )
 
@@ -222,6 +223,184 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		FloatType: builder.Float64,
 	})
 	defer kp.Free()
+
+	// Collect all matrices into param builders
+	matrices := tn.GetRefMatrices()
+	params := make([]*builder.ParamBuilder, 0, len(matrices)+2)
+
+	// Add matrices as parameters
+	for name, mat := range matrices {
+		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
+	}
+
+	U := mat.NewDense(Np, Ktot, nil)
+	DuDxExpected := mat.NewDense(Np, Ktot, nil)
+	DuDyExpected := mat.NewDense(Np, Ktot, nil)
+	DuDzExpected := mat.NewDense(Np, Ktot, nil)
+	fOrder := float64(order)
+	for K := 0; K < Ktot; K++ {
+		for j := 0; j < Np; j++ {
+			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
+			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
+			U.Set(j, K, xP+yP+zP)
+			dxP := float64(fOrder) * math.Pow(x, fOrder-1)
+			dyP := float64(fOrder) * math.Pow(y, fOrder-1)
+			dzP := float64(fOrder) * math.Pow(z, fOrder-1)
+			DuDxExpected.Set(j, K, dxP)
+			DuDyExpected.Set(j, K, dyP)
+			DuDzExpected.Set(j, K, dzP)
+		}
+	}
+
+	// Use matrices for the host output to get the automatic conversion to
+	// row-major storage format
+	DuDx := mat.NewDense(Np, Ktot, nil)
+	DuDy := mat.NewDense(Np, Ktot, nil)
+	DuDz := mat.NewDense(Np, Ktot, nil)
+	// Add array parameters
+	params = append(params,
+		builder.Input("U").Bind(U).CopyTo(),
+		builder.Input("Rx").Bind(tn.Rx).CopyTo(),
+		builder.Input("Sx").Bind(tn.Sx).CopyTo(),
+		builder.Input("Tx").Bind(tn.Tx).CopyTo(),
+		builder.Input("Ry").Bind(tn.Ry).CopyTo(),
+		builder.Input("Sy").Bind(tn.Sy).CopyTo(),
+		builder.Input("Ty").Bind(tn.Ty).CopyTo(),
+		builder.Input("Rz").Bind(tn.Rz).CopyTo(),
+		builder.Input("Sz").Bind(tn.Sz).CopyTo(),
+		builder.Input("Tz").Bind(tn.Tz).CopyTo(),
+		builder.Output("DuDx").Bind(DuDx).CopyBack(),
+		builder.Output("DuDy").Bind(DuDy).CopyBack(),
+		builder.Output("DuDz").Bind(DuDz).CopyBack(),
+		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
+		builder.Temp("Us").Type(builder.Float64).Size(totalNodes),
+		builder.Temp("Ut").Type(builder.Float64).Size(totalNodes),
+	)
+
+	// Define kernel with all parameters
+	kernelName := "differentiate"
+	err := kp.DefineKernel(kernelName, params...)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
+	}
+
+	// Get signature and build kernel
+	signature, _ := kp.GetKernelSignature(kernelName)
+	kernelSource := fmt.Sprintf(`
+#define NP %d
+
+@kernel void %s(%s) {
+    for (int part = 0; part < NPART; ++part; @outer) {
+        const real_t* U = U_PART(part);
+        real_t* Ur = Ur_PART(part);
+        real_t* Us = Us_PART(part);
+        real_t* Ut = Ut_PART(part);
+        MATMUL_Dr_%s(U, Ur, K[part]);
+        MATMUL_Ds_%s(U, Us, K[part]);
+        MATMUL_Dt_%s(U, Ut, K[part]);
+
+        real_t* DuDx = DuDx_PART(part);
+        real_t* DuDy = DuDy_PART(part);
+        real_t* DuDz = DuDz_PART(part);
+        const real_t* Rx = Rx_PART(part);
+        const real_t* Sx = Sx_PART(part);
+        const real_t* Tx = Tx_PART(part);
+        const real_t* Ry = Ry_PART(part);
+        const real_t* Sy = Sy_PART(part);
+        const real_t* Ty = Ty_PART(part);
+        const real_t* Rz = Rz_PART(part);
+        const real_t* Sz = Sz_PART(part);
+        const real_t* Tz = Tz_PART(part);
+		// Single partition means we can safely use KpartMax as K[part]
+        // ************************************************************
+		// *** This computation is happening in column-major format ***
+        // ************************************************************
+		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
+			DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
+			DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
+			DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
+		}
+        // ************************************************************
+		// ** When DuDx... are copied back to host they r transposed **
+        // ************************************************************
+    }
+}
+`, tn.Np, kernelName, signature,
+		props.ShortName, props.ShortName, props.ShortName)
+
+	_, err = kp.BuildKernel(kernelSource, kernelName)
+	if err != nil {
+		t.Fatalf("Failed to build kernel: %v", err)
+	}
+	// Execute differentiation
+	err = kp.RunKernel(kernelName)
+	if err != nil {
+		t.Fatalf("Kernel execution failed: %v", err)
+	}
+
+	DuDxH, DuDyH, DuDzH := calcPhysicalDerivative(U, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
+		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
+
+	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDxH, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDyH, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzH, 1.e-8, "")
+	fmt.Println("Host calculation of physical derivative validates")
+
+	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDx.RawMatrix().Data, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDy.RawMatrix().Data, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDz.RawMatrix().Data, 1.e-8, "")
+	fmt.Println("Device calculation of physical derivative validates")
+}
+
+func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
+	order := 4
+	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
+	Ktot := tn.K
+	Np := tn.Np
+	totalNodes := Np * Ktot
+	k := make([]int, 0)
+	if len(tn.Mesh.EToP) != 0 {
+		// Count elements per partition
+		partitionCounts := make(map[int]int)
+		maxPartID := -1
+		for _, p := range tn.Mesh.EToP {
+			if p >= 0 {
+				partitionCounts[p]++
+				if p > maxPartID {
+					maxPartID = p
+				}
+			}
+		}
+		var pNames []int
+		var elementSum int
+		for p, count := range partitionCounts {
+			pNames = append(pNames, p)
+			elementSum += count
+		}
+		sort.Ints(pNames)
+		fmt.Printf("Total elements: %d, Partition counts: %v\n",
+			elementSum, partitionCounts)
+		if elementSum != Ktot {
+			panic("Wrong partition counts")
+		}
+		fmt.Printf("Partition names: %v\n", pNames)
+		for _, n := range pNames {
+			k = append(k, partitionCounts[n])
+		}
+	} else {
+		k = []int{Ktot}
+	}
+	fmt.Printf("Partition K: %v\n", k)
+	props := tn.GetProperties()
+
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	kp := runner.NewRunner(device, builder.Config{
+		K:         k,
+		FloatType: builder.Float64,
+	})
+	// defer kp.Free()
 
 	// Collect all matrices into param builders
 	matrices := tn.GetRefMatrices()
