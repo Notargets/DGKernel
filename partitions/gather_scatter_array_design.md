@@ -145,29 +145,42 @@ At runtime, only the indices are used. The actual gather/scatter operations are 
 ### Example Device Kernel Usage
 
 ```c
-// Example OCCA kernel for packing send buffer
+// Example OCCA kernel with proper @outer/@inner structure
+// Note: Cannot use sequential counters due to parallel execution
 @kernel void packSendBuffer(const int Npart,
-                           const int myPart,
-                           const int32* pickIndices,
+                           const int maxEntitiesPerPart,
                            const int32* pickOffsets,
+                           const int32* pickIndices,
                            const int pointsPerEntity,
                            const real* sourceArray,
-                           real* sendBuffer) {
-    for (int tgt = 0; tgt < Npart; ++tgt) {
-        if (tgt == myPart) continue;
-        
-        const int32 start = pickOffsets[tgt];
-        const int32 end = pickOffsets[tgt+1];
-        
-        for (int32 e = start; e < end; ++e) {
-            const int32 entityStart = pickIndices[e];
-            // Copy entity points...
+                           real* sendBuffers) {
+    
+    // @outer loop over partitions
+    for (int part = 0; part < Npart; ++part; @outer) {
+        // @inner loop with fixed bounds
+        for (int idx = 0; idx < maxEntitiesPerPart; ++idx; @inner) {
+            const int32 start = pickOffsets[part];
+            const int32 count = pickOffsets[part+1] - start;
+            
+            if (idx < count) {
+                const int32 entityLoc = pickIndices[start + idx];
+                const int32 bufferBase = part * maxEntitiesPerPart * pointsPerEntity + 
+                                        idx * pointsPerEntity;
+                
+                // Copy entity points
+                for (int p = 0; p < pointsPerEntity; ++p) {
+                    sendBuffers[bufferBase + p] = sourceArray[entityLoc + p];
+                }
+            }
         }
     }
 }
 ```
 
-The application determines how to use the indices based on its specific needs.
+Note: Due to OCCA's parallel execution model:
+- Cannot use sequential buffer indexing
+- Must use fixed-size buffers with padding
+- Random simultaneous access to source array is expected
 
 ## Validation Example
 
