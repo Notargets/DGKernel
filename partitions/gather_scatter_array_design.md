@@ -26,23 +26,23 @@ This document specifies a gather/scatter index building system for inter-partiti
 ```go
 // Mesh connectivity (global element IDs)
 type ElementConnectivity struct {
-    EToE   [][]int  // [elem][face] → neighbor element
-    EToF   [][]int  // [elem][face] → neighbor's face
-    BCType [][]int  // [elem][face] → BC type (-1 for interior)
+EToE   [][]int  // [elem][face] → neighbor element
+EToF   [][]int  // [elem][face] → neighbor's face
+BCType [][]int  // [elem][face] → BC type (-1 for interior)
 }
 
 // Partitioning information
 type PartitionInfo struct {
-    EToP           []int   // [globalElem] → partition
-    PartitionElems [][]int // [partition] → list of global elements
-    K              []int   // [partition] → number of elements (computed during build)
+EToP           []int   // [globalElem] → partition
+PartitionElems [][]int // [partition] → list of global elements
+K              []int   // [partition] → number of elements (computed during build)
 }
 
 // Array specification
 type ArraySpec struct {
-    Name               string
-    EntitiesPerElement int    // e.g., 6 faces per hex
-    PointsPerEntity    int    // e.g., 16 points per P3 face
+Name               string
+EntitiesPerElement int    // e.g., 6 faces per hex
+PointsPerEntity    int    // e.g., 16 points per P3 face
 }
 ```
 
@@ -140,58 +140,34 @@ type IndexBuilder struct {
 
 ## Runtime Phase
 
-At runtime, only the indices and array data are needed:
+At runtime, only the indices are used. The actual gather/scatter operations are implemented by the application (typically on device kernels).
 
-### Send Buffer Packing
-```go
-func PackSendBuffer(
-    indices *GatherScatterIndices,
-    sourceArray []float64,
-    targetPartition int,
-) []float64 {
-    start := indices.PickOffsets[targetPartition]
-    end := indices.PickOffsets[targetPartition+1]
-    numEntities := end - start
-    
-    sendBuffer := make([]float64, numEntities * indices.PointsPerEntity)
-    
-    for i := int32(0); i < numEntities; i++ {
-        entityStart := indices.PickIndices[start+i]
-        bufferStart := i * int32(indices.PointsPerEntity)
-        
-        // Copy entire entity
-        for p := 0; p < indices.PointsPerEntity; p++ {
-            sendBuffer[bufferStart+int32(p)] = sourceArray[entityStart+int32(p)]
-        }
-    }
-    
-    return sendBuffer
-}
-```
+### Example Device Kernel Usage
 
-### Receive Buffer Unpacking
-```go
-func UnpackReceiveBuffer(
-    indices *GatherScatterIndices,
-    recvBuffer []float64,
-    sourcePartition int,
-    destArray []float64,
-) {
-    start := indices.PlaceOffsets[sourcePartition]
-    end := indices.PlaceOffsets[sourcePartition+1]
-    numEntities := end - start
-    
-    for i := int32(0); i < numEntities; i++ {
-        entityStart := indices.PlaceIndices[start+i]
-        bufferStart := i * int32(indices.PointsPerEntity)
+```c
+// Example OCCA kernel for packing send buffer
+@kernel void packSendBuffer(const int Npart,
+                           const int myPart,
+                           const int32* pickIndices,
+                           const int32* pickOffsets,
+                           const int pointsPerEntity,
+                           const real* sourceArray,
+                           real* sendBuffer) {
+    for (int tgt = 0; tgt < Npart; ++tgt) {
+        if (tgt == myPart) continue;
         
-        // Copy entire entity
-        for p := 0; p < indices.PointsPerEntity; p++ {
-            destArray[entityStart+int32(p)] = recvBuffer[bufferStart+int32(p)]
+        const int32 start = pickOffsets[tgt];
+        const int32 end = pickOffsets[tgt+1];
+        
+        for (int32 e = start; e < end; ++e) {
+            const int32 entityStart = pickIndices[e];
+            // Copy entity points...
         }
     }
 }
 ```
+
+The application determines how to use the indices based on its specific needs.
 
 ## Validation Example
 
@@ -220,31 +196,44 @@ for elem := 0; elem < numElems; elem++ {
 }
 ```
 
-3. **Executing gather/scatter**
+3. **Executing gather/scatter (validation app implementation)**
 ```go
-// Pack, transfer, unpack using the indices
-sendBuffers := PackAllSendBuffers(indices, localFaces)
-// ... transfer ...
-UnpackAllReceiveBuffers(indices, recvBuffers, remoteFaces)
+// Validation app implements its own pack/unpack for testing
+func (v *Validator) PackSendBuffer(indices *GatherScatterIndices, 
+                                   localFaces []FaceCoordinate, 
+                                   targetPart int) []FaceCoordinate {
+    start := indices.PickOffsets[targetPart]
+    end := indices.PickOffsets[targetPart+1]
+    
+    buffer := make([]FaceCoordinate, end-start)
+    for i := start; i < end; i++ {
+        entityIdx := indices.PickIndices[i] / facesPerElem
+        faceIdx := (indices.PickIndices[i] % facesPerElem) / pointsPerFace
+        buffer[i-start] = localFaces[entityIdx*facesPerElem + faceIdx]
+    }
+    return buffer
+}
+
+// Similarly for unpack...
 ```
 
 4. **Verifying using original connectivity**
 ```go
 // The validation app retained EToE, EToF, EToP to check
 for localElem := 0; localElem < numElems; localElem++ {
-    globalElem := partInfo.PartitionElems[partitionID][localElem]
-    
-    for face := 0; face < facesPerElem; face++ {
-        neighbor := conn.EToE[globalElem][face]
-        if isRemote(neighbor, partitionID, partInfo.EToP) {
-            // Check that remoteFaces contains expected data
-            idx := localElem * facesPerElem + face
-            expected := computeExpectedRemoteFace(neighbor, conn.EToF[globalElem][face])
-            if remoteFaces[idx] != expected {
-                return fmt.Errorf("mismatch at element %d face %d", localElem, face)
-            }
-        }
-    }
+globalElem := partInfo.PartitionElems[partitionID][localElem]
+
+for face := 0; face < facesPerElem; face++ {
+neighbor := conn.EToE[globalElem][face]
+if isRemote(neighbor, partitionID, partInfo.EToP) {
+// Check that remoteFaces contains expected data
+idx := localElem * facesPerElem + face
+expected := computeExpectedRemoteFace(neighbor, conn.EToF[globalElem][face])
+if remoteFaces[idx] != expected {
+return fmt.Errorf("mismatch at element %d face %d", localElem, face)
+}
+}
+}
 }
 ```
 
