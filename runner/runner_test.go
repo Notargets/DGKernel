@@ -177,17 +177,21 @@ func TestDGKernel_CodeGen_MatrixMacroStructure(t *testing.T) {
 
 // ============================================================================
 // Section 3: Kernel Execution Tests with New API
+// Note: When using multiple partitions (len(K) > 1), use partitioned data:
+//   - Non-partitioned: []float64 for single partition
+//   - Partitioned: [][]float64 for multiple partitions
 // ============================================================================
 
-// Test 3.1: Basic kernel with new API
+// Test 3.1: Basic kernel with new API (single partition)
 func TestDGKernel_NewAPI_BasicKernel(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
+	// Single partition - use non-partitioned data
 	kp := NewRunner(device, builder.Config{K: []int{10}})
 	defer kp.Free()
 
-	// Host data
+	// Host data - non-partitioned for single partition
 	hostData := make([]float64, 10)
 	for i := range hostData {
 		hostData[i] = float64(i)
@@ -263,11 +267,17 @@ func TestDGKernel_NewAPI_MatrixOperation(t *testing.T) {
 		0.0, 1.0, -3.0, 2.0,
 	})
 
-	// Initialize test data
-	U := make([]float64, totalNodes)
-	Ur := make([]float64, totalNodes)
-	for i := range U {
-		U[i] = float64(i % 10)
+	// Initialize test data as partitioned arrays (since we have multiple partitions)
+	U := make([][]float64, len(k))
+	Ur := make([][]float64, len(k))
+	idx := 0
+	for part := 0; part < len(k); part++ {
+		U[part] = make([]float64, k[part]*np)
+		Ur[part] = make([]float64, k[part]*np)
+		for i := range U[part] {
+			U[part][i] = float64(idx % 10)
+			idx++
+		}
 	}
 
 	// Define kernel with new API
@@ -333,19 +343,26 @@ func TestDGKernel_NewAPI_MultipleArrays(t *testing.T) {
 	defer device.Free()
 
 	k := []int{10, 15, 20}
-	totalElements := 45
 
 	kp := NewRunner(device, builder.Config{K: k})
 	defer kp.Free()
 
-	// Initialize host arrays
-	hostU := make([]float64, totalElements)
-	hostV := make([]float64, totalElements)
-	hostW := make([]float64, totalElements)
+	// Initialize host arrays as partitioned data
+	hostU := make([][]float64, len(k))
+	hostV := make([][]float64, len(k))
+	hostW := make([][]float64, len(k))
 
-	for i := range hostU {
-		hostU[i] = float64(i)
-		hostV[i] = float64(i * 2)
+	idx := 0
+	for part := 0; part < len(k); part++ {
+		hostU[part] = make([]float64, k[part])
+		hostV[part] = make([]float64, k[part])
+		hostW[part] = make([]float64, k[part])
+
+		for i := range hostU[part] {
+			hostU[part][i] = float64(idx)
+			hostV[part][i] = float64(idx * 2)
+			idx++
+		}
 	}
 
 	// Define kernel with new API
@@ -395,12 +412,77 @@ func TestDGKernel_NewAPI_MultipleArrays(t *testing.T) {
 		t.Fatalf("Failed to copy result: %v", err)
 	}
 
-	for i := 0; i < totalElements; i++ {
-		expected := hostU[i] + hostV[i]
-		if math.Abs(result[i]-expected) > 1e-10 {
-			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
+	// Check results match expected values
+	idx = 0
+	for part := 0; part < len(k); part++ {
+		for i := 0; i < k[part]; i++ {
+			expected := hostU[part][i] + hostV[part][i]
+			if math.Abs(result[idx]-expected) > 1e-10 {
+				t.Errorf("Element %d: expected %f, got %f", idx, expected, result[idx])
+			}
+			idx++
 		}
 	}
+}
+
+// Test 3.4: Demonstrates partitioned vs non-partitioned data usage
+func TestDGKernel_NewAPI_PartitionedVsNonPartitioned(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	// Test single partition with non-partitioned data
+	t.Run("SinglePartition", func(t *testing.T) {
+		kp := NewRunner(device, builder.Config{K: []int{20}})
+		defer kp.Free()
+
+		// Non-partitioned data for single partition
+		hostData := make([]float64, 20)
+		for i := range hostData {
+			hostData[i] = float64(i)
+		}
+
+		err := kp.DefineKernel("single",
+			builder.InOut("data").Bind(hostData).Copy(),
+		)
+		if err != nil {
+			t.Fatalf("Failed to define kernel: %v", err)
+		}
+
+		// This should work fine
+		if !kp.IsPartitioned {
+			t.Log("Single partition correctly uses non-partitioned kernel")
+		}
+	})
+
+	// Test multiple partitions with partitioned data
+	t.Run("MultiplePartitions", func(t *testing.T) {
+		kp := NewRunner(device, builder.Config{K: []int{10, 15}})
+		defer kp.Free()
+
+		// Partitioned data for multiple partitions
+		hostData := make([][]float64, 2)
+		hostData[0] = make([]float64, 10)
+		hostData[1] = make([]float64, 15)
+
+		for i := range hostData[0] {
+			hostData[0][i] = float64(i)
+		}
+		for i := range hostData[1] {
+			hostData[1][i] = float64(i + 100)
+		}
+
+		err := kp.DefineKernel("multi",
+			builder.InOut("data").Bind(hostData).Copy(),
+		)
+		if err != nil {
+			t.Fatalf("Failed to define kernel: %v", err)
+		}
+
+		// This should work fine
+		if kp.IsPartitioned {
+			t.Log("Multiple partitions correctly uses partitioned kernel")
+		}
+	})
 }
 
 // ============================================================================
@@ -451,13 +533,15 @@ func TestDGKernel_MathProperties_OffsetCalculations(t *testing.T) {
 	defer device.Free()
 
 	k := []int{10, 15, 20}
-	totalElements := 45
 
 	kp := NewRunner(device, builder.Config{K: k})
 	defer kp.Free()
 
-	// Create host data
-	hostData := make([]float64, totalElements)
+	// Create host data as partitioned arrays
+	hostData := make([][]float64, len(k))
+	for part := 0; part < len(k); part++ {
+		hostData[part] = make([]float64, k[part])
+	}
 
 	// Define kernel to trigger array allocation
 	err := kp.DefineKernel("test",
