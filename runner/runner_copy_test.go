@@ -160,14 +160,17 @@ func TestRunner_PartitionCopy(t *testing.T) {
 	})
 	defer kp.Free()
 
-	totalElements := 15
-	hostData := make([]float64, totalElements)
+	hostData := [][]float64{
+		make([]float64, k[0]),
+		make([]float64, k[1]),
+		make([]float64, k[2]),
+	}
 
 	// Initialize with partition-specific patterns
 	idx := 0
 	for part, partK := range k {
 		for elem := 0; elem < partK; elem++ {
-			hostData[idx] = float64(part*100 + elem)
+			hostData[part][elem] = float64(part*100 + elem)
 			idx++
 		}
 	}

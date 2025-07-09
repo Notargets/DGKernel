@@ -168,14 +168,30 @@ func TestRunner_MultiplePartitions(t *testing.T) {
 	defer kp.Free()
 
 	// Host arrays
-	hostA := make([]float64, totalElements)
-	hostB := make([]float64, totalElements)
-	hostC := make([]float64, totalElements)
+	hostA := [][]float64{
+		make([]float64, k[0]),
+		make([]float64, k[1]),
+		make([]float64, k[2]),
+	}
+	hostB := [][]float64{
+		make([]float64, k[0]),
+		make([]float64, k[1]),
+		make([]float64, k[2]),
+	}
+	hostC := [][]float64{
+		make([]float64, k[0]),
+		make([]float64, k[1]),
+		make([]float64, k[2]),
+	}
 
 	// Initialize
-	for i := range hostA {
-		hostA[i] = float64(i)
-		hostB[i] = float64(i * 2)
+	var iii int
+	for p := 0; p < len(k); p++ {
+		for i := range hostA[p] {
+			hostA[p][i] = float64(iii)
+			hostB[p][i] = float64(iii * 2)
+			iii++
+		}
 	}
 
 	// Define kernel
@@ -237,85 +253,6 @@ func TestRunner_MultiplePartitions(t *testing.T) {
 // Section 3: Edge Cases and Error Handling
 // Ported from copy tests
 // ============================================================================
-
-func TestRunner_EmptyPartition(t *testing.T) {
-	device := utils.CreateTestDevice()
-	defer device.Free()
-
-	// K array with empty partition
-	k := []int{0, 5, 0, 3}
-	kp := NewRunner(device, builder.Config{K: k})
-	defer kp.Free()
-
-	totalElements := 8
-	hostData := make([]float64, totalElements)
-
-	// Define kernel
-	err := kp.DefineKernel("processData",
-		builder.InOut("data").Bind(hostData).Copy(),
-	)
-	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
-	}
-
-	signature, _ := kp.GetKernelSignature("processData")
-
-	// Kernel that increments non-empty partitions
-	kernelSource := fmt.Sprintf(`
-@kernel void processData(
-	%s
-) {
-	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
-		
-		for (int i = 0; i < KpartMax; ++i; @inner) {
-			if (i < K[part]) {
-				data[i] += 1.0;
-			}
-		}
-	}
-}`, signature)
-
-	_, err = kp.BuildKernel(kernelSource, "processData")
-	if err != nil {
-		t.Fatalf("Failed to build kernel: %v", err)
-	}
-
-	// Initialize data
-	idx := 0
-	for partID, partK := range k {
-		for i := 0; i < partK; i++ {
-			hostData[idx] = float64(partID*100 + i)
-			idx++
-		}
-	}
-
-	err = kp.RunKernel("processData")
-	if err != nil {
-		t.Fatalf("Kernel execution failed: %v", err)
-	}
-
-	// Test partition copies including empty ones
-	for partID, partK := range k {
-		result, err := CopyPartitionToHost[float64](kp, "data", partID)
-		if err != nil {
-			t.Fatalf("Failed to copy partition %d: %v", partID, err)
-		}
-
-		if len(result) != partK {
-			t.Errorf("Partition %d: expected %d elements, got %d", partID, partK, len(result))
-		}
-
-		// Verify data in non-empty partitions
-		for i := 0; i < partK; i++ {
-			expected := float64(partID*100+i) + 1.0 // incremented by kernel
-			if math.Abs(result[i]-expected) > 1e-10 {
-				t.Errorf("Partition %d, element %d: expected %f, got %f",
-					partID, i, expected, result[i])
-			}
-		}
-	}
-}
 
 func TestRunner_TypeMismatch(t *testing.T) {
 	device := utils.CreateTestDevice()

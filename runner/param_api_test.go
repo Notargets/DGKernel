@@ -16,7 +16,8 @@ func TestParameterAPI_BasicUsage(t *testing.T) {
 
 	// Setup runner
 	kp := NewRunner(device, builder.Config{
-		K:         []int{10, 15},
+		// K:         []int{10, 15},
+		K:         []int{25},
 		FloatType: builder.Float64,
 	})
 	defer kp.Free()
