@@ -1,3 +1,4 @@
+// runner/kernel_copy.go
 package runner
 
 import (
@@ -15,10 +16,11 @@ func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
 		return fmt.Errorf("memory for %s not found", spec.Name)
 	}
 
-	// NEW: Handle partitioned data
+	// Handle partitioned data
 	if spec.IsPartitioned {
 		return kr.copyPartitionedData(spec, mem)
 	}
+
 	// Handle type conversion if needed
 	if spec.ConvertType != 0 && spec.ConvertType != spec.DataType {
 		// Perform conversion during copy
@@ -35,7 +37,6 @@ func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
 		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
 	case []int64:
 		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-		// Add this case to the type switch in copyToDeviceWithConversion method in runner/kernel_definition.go
 	case mat.Matrix:
 		// Handle mat.Matrix as a flat array
 		rows, cols := data.Dims()
@@ -58,7 +59,7 @@ func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
 	return nil
 }
 
-// NEW: Add function to copy partitioned data
+// copyPartitionedData handles partitioned data copy with optional type conversion
 func (kr *Runner) copyPartitionedData(spec *builder.ParamSpec, deviceMem *gocca.OCCAMemory) error {
 	// Get offset array
 	offsetsMem := kr.PooledMemory[spec.Name+"_offsets"]
@@ -80,44 +81,123 @@ func (kr *Runner) copyPartitionedData(spec *builder.ParamSpec, deviceMem *gocca.
 		offsetsMem.CopyTo(unsafe.Pointer(&offsets[0]), int64(len(offsets)*8))
 	}
 
-	// Copy each partition to its aligned offset
+	// Determine if conversion is needed
+	needsConversion := spec.ConvertType != 0 && spec.ConvertType != spec.DataType
+	targetType := spec.DataType
+	if needsConversion {
+		targetType = spec.ConvertType
+	}
+
+	// Copy each partition with optional conversion
 	switch data := spec.HostBinding.(type) {
 	case [][]float64:
 		for i, partition := range data {
 			if i >= kr.NumPartitions {
 				break
 			}
-			partitionBytes := int64(len(partition) * 8)
-			offsetBytes := offsets[i] * 8
-			deviceMem.CopyFromWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
+
+			var ptr unsafe.Pointer
+			var bytes int64
+
+			if needsConversion && targetType == builder.Float32 {
+				// Convert float64 to float32
+				converted := make([]float32, len(partition))
+				for j, v := range partition {
+					converted[j] = float32(v)
+				}
+				ptr = unsafe.Pointer(&converted[0])
+				bytes = int64(len(converted) * 4)
+			} else {
+				// Direct copy
+				ptr = unsafe.Pointer(&partition[0])
+				bytes = int64(len(partition) * 8)
+			}
+
+			offsetBytes := offsets[i] * int64(sizeOfType(targetType))
+			deviceMem.CopyFromWithOffset(ptr, bytes, offsetBytes)
 		}
+
 	case [][]float32:
 		for i, partition := range data {
 			if i >= kr.NumPartitions {
 				break
 			}
-			partitionBytes := int64(len(partition) * 4)
-			offsetBytes := offsets[i] * 4
-			deviceMem.CopyFromWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
+
+			var ptr unsafe.Pointer
+			var bytes int64
+
+			if needsConversion && targetType == builder.Float64 {
+				// Convert float32 to float64
+				converted := make([]float64, len(partition))
+				for j, v := range partition {
+					converted[j] = float64(v)
+				}
+				ptr = unsafe.Pointer(&converted[0])
+				bytes = int64(len(converted) * 8)
+			} else {
+				// Direct copy
+				ptr = unsafe.Pointer(&partition[0])
+				bytes = int64(len(partition) * 4)
+			}
+
+			offsetBytes := offsets[i] * int64(sizeOfType(targetType))
+			deviceMem.CopyFromWithOffset(ptr, bytes, offsetBytes)
 		}
+
 	case [][]int32:
 		for i, partition := range data {
 			if i >= kr.NumPartitions {
 				break
 			}
-			partitionBytes := int64(len(partition) * 4)
-			offsetBytes := offsets[i] * 4
-			deviceMem.CopyFromWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
+
+			var ptr unsafe.Pointer
+			var bytes int64
+
+			if needsConversion && targetType == builder.INT64 {
+				// Convert int32 to int64
+				converted := make([]int64, len(partition))
+				for j, v := range partition {
+					converted[j] = int64(v)
+				}
+				ptr = unsafe.Pointer(&converted[0])
+				bytes = int64(len(converted) * 8)
+			} else {
+				// Direct copy
+				ptr = unsafe.Pointer(&partition[0])
+				bytes = int64(len(partition) * 4)
+			}
+
+			offsetBytes := offsets[i] * int64(sizeOfType(targetType))
+			deviceMem.CopyFromWithOffset(ptr, bytes, offsetBytes)
 		}
+
 	case [][]int64:
 		for i, partition := range data {
 			if i >= kr.NumPartitions {
 				break
 			}
-			partitionBytes := int64(len(partition) * 8)
-			offsetBytes := offsets[i] * 8
-			deviceMem.CopyFromWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
+
+			var ptr unsafe.Pointer
+			var bytes int64
+
+			if needsConversion && targetType == builder.INT32 {
+				// Convert int64 to int32
+				converted := make([]int32, len(partition))
+				for j, v := range partition {
+					converted[j] = int32(v)
+				}
+				ptr = unsafe.Pointer(&converted[0])
+				bytes = int64(len(converted) * 4)
+			} else {
+				// Direct copy
+				ptr = unsafe.Pointer(&partition[0])
+				bytes = int64(len(partition) * 8)
+			}
+
+			offsetBytes := offsets[i] * int64(sizeOfType(targetType))
+			deviceMem.CopyFromWithOffset(ptr, bytes, offsetBytes)
 		}
+
 	case []mat.Matrix:
 		for i, matrix := range data {
 			if i >= kr.NumPartitions {
@@ -134,10 +214,27 @@ func (kr *Runner) copyPartitionedData(spec *builder.ParamSpec, deviceMem *gocca.
 				}
 			}
 
-			partitionBytes := int64(size * 8)
-			offsetBytes := offsets[i] * 8
-			deviceMem.CopyFromWithOffset(unsafe.Pointer(&flatData[0]), partitionBytes, offsetBytes)
+			var ptr unsafe.Pointer
+			var bytes int64
+
+			if needsConversion && targetType == builder.Float32 {
+				// Convert float64 to float32
+				converted := make([]float32, size)
+				for j, v := range flatData {
+					converted[j] = float32(v)
+				}
+				ptr = unsafe.Pointer(&converted[0])
+				bytes = int64(len(converted) * 4)
+			} else {
+				// Direct copy
+				ptr = unsafe.Pointer(&flatData[0])
+				bytes = int64(size * 8)
+			}
+
+			offsetBytes := offsets[i] * int64(sizeOfType(targetType))
+			deviceMem.CopyFromWithOffset(ptr, bytes, offsetBytes)
 		}
+
 	default:
 		return fmt.Errorf("unsupported partitioned type: %T", data)
 	}
@@ -177,109 +274,18 @@ func (kr *Runner) copyWithTypeConversion(hostData interface{}, deviceMem *gocca.
 	return fmt.Errorf("unsupported conversion from %v to %v", fromType, toType)
 }
 
-// NEW: Add function to copy partitioned data from device
-func (kr *Runner) copyPartitionedDataFromDevice(spec *builder.ParamSpec, deviceMem *gocca.OCCAMemory) error {
-	// Get offset array
-	offsetsMem := kr.PooledMemory[spec.Name+"_offsets"]
-	if offsetsMem == nil {
-		return fmt.Errorf("offsets for %s not found", spec.Name)
-	}
-
-	// Read offsets
-	var offsets []int64
-	if kr.GetIntSize() == 4 {
-		offsets32 := make([]int32, kr.NumPartitions+1)
-		offsetsMem.CopyTo(unsafe.Pointer(&offsets32[0]), int64(len(offsets32)*4))
-		offsets = make([]int64, len(offsets32))
-		for i, v := range offsets32 {
-			offsets[i] = int64(v)
-		}
-	} else {
-		offsets = make([]int64, kr.NumPartitions+1)
-		offsetsMem.CopyTo(unsafe.Pointer(&offsets[0]), int64(len(offsets)*8))
-	}
-
-	// Copy each partition from its aligned offset
-	switch data := spec.HostBinding.(type) {
-	case [][]float64:
-		for i, partition := range data {
-			if i >= kr.NumPartitions {
-				break
-			}
-			partitionBytes := int64(len(partition) * 8)
-			offsetBytes := offsets[i] * 8
-			deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
-		}
-	case [][]float32:
-		for i, partition := range data {
-			if i >= kr.NumPartitions {
-				break
-			}
-			partitionBytes := int64(len(partition) * 4)
-			offsetBytes := offsets[i] * 4
-			deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
-		}
-	case [][]int32:
-		for i, partition := range data {
-			if i >= kr.NumPartitions {
-				break
-			}
-			partitionBytes := int64(len(partition) * 4)
-			offsetBytes := offsets[i] * 4
-			deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
-		}
-	case [][]int64:
-		for i, partition := range data {
-			if i >= kr.NumPartitions {
-				break
-			}
-			partitionBytes := int64(len(partition) * 8)
-			offsetBytes := offsets[i] * 8
-			deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
-		}
-	case []mat.Matrix:
-		for i, matrix := range data {
-			if i >= kr.NumPartitions {
-				break
-			}
-			rows, cols := matrix.Dims()
-			size := rows * cols
-
-			// Create temporary buffer to receive device data
-			flatData := make([]float64, size)
-			partitionBytes := int64(size * 8)
-			offsetBytes := offsets[i] * 8
-			deviceMem.CopyToWithOffset(unsafe.Pointer(&flatData[0]), partitionBytes, offsetBytes)
-
-			// Type assert to mutable matrix
-			if m, ok := matrix.(*mat.Dense); ok {
-				// Unpack column-major data back into the Dense matrix
-				for r := 0; r < rows; r++ {
-					for c := 0; c < cols; c++ {
-						// Column-major: position c*rows + r contains element (r,c)
-						val := flatData[c*rows+r]
-						m.Set(r, c, val)
-					}
-				}
-			}
-		}
-	default:
-		return fmt.Errorf("unsupported partitioned type for copy back: %T", data)
-	}
-
-	return nil
-}
-
 // copyFromDeviceWithConversion handles device→host copy with optional type conversion
 func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
 	mem := kr.GetMemory(spec.Name)
 	if mem == nil {
 		return fmt.Errorf("memory for %s not found", spec.Name)
 	}
-	// NEW: Handle partitioned data
+
+	// Handle partitioned data
 	if spec.IsPartitioned {
 		return kr.copyPartitionedDataFromDevice(spec, mem)
 	}
+
 	// For now, use the existing CopyArrayToHost for full arrays
 	// This would be enhanced to handle partial copies and conversions
 
@@ -340,13 +346,15 @@ func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
 	return nil
 }
 
-// Helper function to get offsets for a named array
-func (kr *Runner) getPartitionOffsets(name string) ([]int64, error) {
-	offsetsMem := kr.PooledMemory[name+"_offsets"]
+// copyPartitionedDataFromDevice handles partitioned data copy from device with optional type conversion
+func (kr *Runner) copyPartitionedDataFromDevice(spec *builder.ParamSpec, deviceMem *gocca.OCCAMemory) error {
+	// Get offset array
+	offsetsMem := kr.PooledMemory[spec.Name+"_offsets"]
 	if offsetsMem == nil {
-		return nil, fmt.Errorf("offsets for %s not found", name)
+		return fmt.Errorf("offsets for %s not found", spec.Name)
 	}
 
+	// Read offsets
 	var offsets []int64
 	if kr.GetIntSize() == 4 {
 		offsets32 := make([]int32, kr.NumPartitions+1)
@@ -359,156 +367,179 @@ func (kr *Runner) getPartitionOffsets(name string) ([]int64, error) {
 		offsets = make([]int64, kr.NumPartitions+1)
 		offsetsMem.CopyTo(unsafe.Pointer(&offsets[0]), int64(len(offsets)*8))
 	}
-	return offsets, nil
-}
 
-// Partitioned float64 to float32 conversion
-func (kr *Runner) copyPartitionedFloat64ToFloat32(partitions [][]float64, deviceMem *gocca.OCCAMemory) error {
-	// Note: We need to find the array name from metadata - this is a limitation
-	// For now, assume we can get it from context or pass it as parameter
-	// This would need refactoring to pass the spec or name
+	// Determine if conversion is needed
+	needsConversion := spec.ConvertType != 0 && spec.ConvertType != spec.DataType
+	sourceType := spec.GetEffectiveType()
+	targetType := spec.DataType
+	_ = targetType
 
-	// For each partition
-	for i, partition := range partitions {
-		if i >= kr.NumPartitions {
-			break
+	// Copy each partition with optional conversion
+	switch data := spec.HostBinding.(type) {
+	case [][]float64:
+		for i, partition := range data {
+			if i >= kr.NumPartitions {
+				break
+			}
+
+			if needsConversion && sourceType == builder.Float32 {
+				// Read as float32 and convert to float64
+				temp := make([]float32, len(partition))
+				partitionBytes := int64(len(temp) * 4)
+				offsetBytes := offsets[i] * 4
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
+
+				// Convert to float64
+				for j, v := range temp {
+					partition[j] = float64(v)
+				}
+			} else {
+				// Direct copy
+				partitionBytes := int64(len(partition) * 8)
+				offsetBytes := offsets[i] * 8
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
+			}
 		}
 
-		// Convert float64 to float32
-		converted := make([]float32, len(partition))
-		for j, v := range partition {
-			converted[j] = float32(v)
+	case [][]float32:
+		for i, partition := range data {
+			if i >= kr.NumPartitions {
+				break
+			}
+
+			if needsConversion && sourceType == builder.Float64 {
+				// Read as float64 and convert to float32
+				temp := make([]float64, len(partition))
+				partitionBytes := int64(len(temp) * 8)
+				offsetBytes := offsets[i] * 8
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
+
+				// Convert to float32
+				for j, v := range temp {
+					partition[j] = float32(v)
+				}
+			} else {
+				// Direct copy
+				partitionBytes := int64(len(partition) * 4)
+				offsetBytes := offsets[i] * 4
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
+			}
 		}
 
-		// Calculate offset manually based on partition sizes
-		offset := int64(0)
-		for p := 0; p < i; p++ {
-			offset += int64(kr.K[p] * len(partition) / kr.K[i])
+	case [][]int32:
+		for i, partition := range data {
+			if i >= kr.NumPartitions {
+				break
+			}
+
+			if needsConversion && sourceType == builder.INT64 {
+				// Read as int64 and convert to int32
+				temp := make([]int64, len(partition))
+				partitionBytes := int64(len(temp) * 8)
+				offsetBytes := offsets[i] * 8
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
+
+				// Convert to int32
+				for j, v := range temp {
+					partition[j] = int32(v)
+				}
+			} else {
+				// Direct copy
+				partitionBytes := int64(len(partition) * 4)
+				offsetBytes := offsets[i] * 4
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
+			}
 		}
 
-		partitionBytes := int64(len(converted) * 4)
-		offsetBytes := offset * 4
-		deviceMem.CopyFromWithOffset(unsafe.Pointer(&converted[0]), partitionBytes, offsetBytes)
+	case [][]int64:
+		for i, partition := range data {
+			if i >= kr.NumPartitions {
+				break
+			}
+
+			if needsConversion && sourceType == builder.INT32 {
+				// Read as int32 and convert to int64
+				temp := make([]int32, len(partition))
+				partitionBytes := int64(len(temp) * 4)
+				offsetBytes := offsets[i] * 4
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
+
+				// Convert to int64
+				for j, v := range temp {
+					partition[j] = int64(v)
+				}
+			} else {
+				// Direct copy
+				partitionBytes := int64(len(partition) * 8)
+				offsetBytes := offsets[i] * 8
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
+			}
+		}
+
+	case []mat.Matrix:
+		for i, matrix := range data {
+			if i >= kr.NumPartitions {
+				break
+			}
+
+			rows, cols := matrix.Dims()
+			size := rows * cols
+
+			if needsConversion && sourceType == builder.Float32 {
+				// Read as float32 and convert to float64
+				temp := make([]float32, size)
+				partitionBytes := int64(size * 4)
+				offsetBytes := offsets[i] * 4
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
+
+				// Type assert to mutable matrix
+				if m, ok := matrix.(*mat.Dense); ok {
+					// Convert and unpack
+					for r := 0; r < rows; r++ {
+						for c := 0; c < cols; c++ {
+							val := float64(temp[c*rows+r])
+							m.Set(r, c, val)
+						}
+					}
+				}
+			} else {
+				// Direct copy
+				flatData := make([]float64, size)
+				partitionBytes := int64(size * 8)
+				offsetBytes := offsets[i] * 8
+				deviceMem.CopyToWithOffset(unsafe.Pointer(&flatData[0]), partitionBytes, offsetBytes)
+
+				// Type assert to mutable matrix
+				if m, ok := matrix.(*mat.Dense); ok {
+					// Unpack column-major data back into the Dense matrix
+					for r := 0; r < rows; r++ {
+						for c := 0; c < cols; c++ {
+							val := flatData[c*rows+r]
+							m.Set(r, c, val)
+						}
+					}
+				}
+			}
+		}
+
+	default:
+		return fmt.Errorf("unsupported partitioned type for copy back: %T", data)
 	}
 
 	return nil
 }
 
-// Partitioned float32 to float64 conversion
-func (kr *Runner) copyPartitionedFloat32ToFloat64(partitions [][]float32, deviceMem *gocca.OCCAMemory) error {
-	for i, partition := range partitions {
-		if i >= kr.NumPartitions {
-			break
-		}
-
-		// Convert float32 to float64
-		converted := make([]float64, len(partition))
-		for j, v := range partition {
-			converted[j] = float64(v)
-		}
-
-		// Calculate offset manually
-		offset := int64(0)
-		for p := 0; p < i; p++ {
-			offset += int64(kr.K[p] * len(partition) / kr.K[i])
-		}
-
-		partitionBytes := int64(len(converted) * 8)
-		offsetBytes := offset * 8
-		deviceMem.CopyFromWithOffset(unsafe.Pointer(&converted[0]), partitionBytes, offsetBytes)
-	}
-
-	return nil
-}
-
-// Partitioned int64 to int32 conversion
-func (kr *Runner) copyPartitionedInt64ToInt32(partitions [][]int64, deviceMem *gocca.OCCAMemory) error {
-	for i, partition := range partitions {
-		if i >= kr.NumPartitions {
-			break
-		}
-
-		// Convert int64 to int32
-		converted := make([]int32, len(partition))
-		for j, v := range partition {
-			converted[j] = int32(v)
-		}
-
-		// Calculate offset manually
-		offset := int64(0)
-		for p := 0; p < i; p++ {
-			offset += int64(kr.K[p] * len(partition) / kr.K[i])
-		}
-
-		partitionBytes := int64(len(converted) * 4)
-		offsetBytes := offset * 4
-		deviceMem.CopyFromWithOffset(unsafe.Pointer(&converted[0]), partitionBytes, offsetBytes)
-	}
-
-	return nil
-}
-
-// Partitioned int32 to int64 conversion
-func (kr *Runner) copyPartitionedInt32ToInt64(partitions [][]int32, deviceMem *gocca.OCCAMemory) error {
-	for i, partition := range partitions {
-		if i >= kr.NumPartitions {
-			break
-		}
-
-		// Convert int32 to int64
-		converted := make([]int64, len(partition))
-		for j, v := range partition {
-			converted[j] = int64(v)
-		}
-
-		// Calculate offset manually
-		offset := int64(0)
-		for p := 0; p < i; p++ {
-			offset += int64(kr.K[p] * len(partition) / kr.K[i])
-		}
-
-		partitionBytes := int64(len(converted) * 8)
-		offsetBytes := offset * 8
-		deviceMem.CopyFromWithOffset(unsafe.Pointer(&converted[0]), partitionBytes, offsetBytes)
-	}
-
-	return nil
-}
-
-// Update copyFromDeviceWithTypeConversion to handle partitioned data
+// copyFromDeviceWithTypeConversion performs type conversion during device→host copy
 func (kr *Runner) copyFromDeviceWithTypeConversion(deviceMem *gocca.OCCAMemory, hostData interface{},
 	fromType, toType builder.DataType, totalSize int64) error {
-
-	// Handle partitioned data with type conversion
-	switch data := hostData.(type) {
-	case [][]float64:
-		if fromType == builder.Float32 {
-			return kr.copyPartitionedFloat32ToFloat64FromDevice(data, deviceMem)
-		}
-		return fmt.Errorf("unsupported conversion from %v to [][]float64", fromType)
-	case [][]float32:
-		if fromType == builder.Float64 {
-			return kr.copyPartitionedFloat64ToFloat32FromDevice(data, deviceMem)
-		}
-		return fmt.Errorf("unsupported conversion from %v to [][]float32", fromType)
-	case [][]int64:
-		if fromType == builder.INT32 {
-			return kr.copyPartitionedInt32ToInt64FromDevice(data, deviceMem)
-		}
-		return fmt.Errorf("unsupported conversion from %v to [][]int64", fromType)
-	case [][]int32:
-		if fromType == builder.INT64 {
-			return kr.copyPartitionedInt64ToInt32FromDevice(data, deviceMem)
-		}
-		return fmt.Errorf("unsupported conversion from %v to [][]int32", fromType)
-	}
-
-	// Existing conversion logic for non-partitioned data
+	// This is a simplified example - full implementation would handle all conversions
 	switch fromType {
 	case builder.Float32:
 		if toType == builder.Float64 {
+			// Device has float32, host wants float64
 			temp := make([]float32, totalSize/4)
 			deviceMem.CopyTo(unsafe.Pointer(&temp[0]), totalSize)
+
 			dst := hostData.([]float64)
 			for i, v := range temp {
 				dst[i] = float64(v)
@@ -517,8 +548,10 @@ func (kr *Runner) copyFromDeviceWithTypeConversion(deviceMem *gocca.OCCAMemory, 
 		}
 	case builder.Float64:
 		if toType == builder.Float32 {
+			// Device has float64, host wants float32
 			temp := make([]float64, totalSize/8)
 			deviceMem.CopyTo(unsafe.Pointer(&temp[0]), totalSize)
+
 			dst := hostData.([]float32)
 			for i, v := range temp {
 				dst[i] = float32(v)
@@ -528,120 +561,4 @@ func (kr *Runner) copyFromDeviceWithTypeConversion(deviceMem *gocca.OCCAMemory, 
 	}
 
 	return fmt.Errorf("unsupported conversion from %v to %v", fromType, toType)
-}
-
-// Partitioned float32 to float64 conversion from device
-func (kr *Runner) copyPartitionedFloat32ToFloat64FromDevice(partitions [][]float64, deviceMem *gocca.OCCAMemory) error {
-	for i, partition := range partitions {
-		if i >= kr.NumPartitions {
-			break
-		}
-
-		// Read as float32 and convert to float64
-		temp := make([]float32, len(partition))
-
-		// Calculate offset manually
-		offset := int64(0)
-		for p := 0; p < i; p++ {
-			offset += int64(kr.K[p] * len(partition) / kr.K[i])
-		}
-
-		partitionBytes := int64(len(temp) * 4)
-		offsetBytes := offset * 4
-		deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
-
-		// Convert to float64
-		for j, v := range temp {
-			partition[j] = float64(v)
-		}
-	}
-
-	return nil
-}
-
-// Partitioned float64 to float32 conversion from device
-func (kr *Runner) copyPartitionedFloat64ToFloat32FromDevice(partitions [][]float32, deviceMem *gocca.OCCAMemory) error {
-	for i, partition := range partitions {
-		if i >= kr.NumPartitions {
-			break
-		}
-
-		// Read as float64 and convert to float32
-		temp := make([]float64, len(partition))
-
-		// Calculate offset manually
-		offset := int64(0)
-		for p := 0; p < i; p++ {
-			offset += int64(kr.K[p] * len(partition) / kr.K[i])
-		}
-
-		partitionBytes := int64(len(temp) * 8)
-		offsetBytes := offset * 8
-		deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
-
-		// Convert to float32
-		for j, v := range temp {
-			partition[j] = float32(v)
-		}
-	}
-
-	return nil
-}
-
-// Partitioned int32 to int64 conversion from device
-func (kr *Runner) copyPartitionedInt32ToInt64FromDevice(partitions [][]int64, deviceMem *gocca.OCCAMemory) error {
-	for i, partition := range partitions {
-		if i >= kr.NumPartitions {
-			break
-		}
-
-		// Read as int32 and convert to int64
-		temp := make([]int32, len(partition))
-
-		// Calculate offset manually
-		offset := int64(0)
-		for p := 0; p < i; p++ {
-			offset += int64(kr.K[p] * len(partition) / kr.K[i])
-		}
-
-		partitionBytes := int64(len(temp) * 4)
-		offsetBytes := offset * 4
-		deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
-
-		// Convert to int64
-		for j, v := range temp {
-			partition[j] = int64(v)
-		}
-	}
-
-	return nil
-}
-
-// Partitioned int64 to int32 conversion from device
-func (kr *Runner) copyPartitionedInt64ToInt32FromDevice(partitions [][]int32, deviceMem *gocca.OCCAMemory) error {
-	for i, partition := range partitions {
-		if i >= kr.NumPartitions {
-			break
-		}
-
-		// Read as int64 and convert to int32
-		temp := make([]int64, len(partition))
-
-		// Calculate offset manually
-		offset := int64(0)
-		for p := 0; p < i; p++ {
-			offset += int64(kr.K[p] * len(partition) / kr.K[i])
-		}
-
-		partitionBytes := int64(len(temp) * 8)
-		offsetBytes := offset * 8
-		deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
-
-		// Convert to int32
-		for j, v := range temp {
-			partition[j] = int32(v)
-		}
-	}
-
-	return nil
 }
