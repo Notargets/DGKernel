@@ -54,6 +54,17 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilde
 
 // processParameter handles allocation and setup for a single parameter
 func (kr *Runner) processParameter(spec *builder.ParamSpec) error {
+	// NEW: Validate partitioned data matches kernel configuration
+	if spec.IsPartitioned && !kr.IsPartitioned {
+		return fmt.Errorf("partitioned data %s provided to non-partitioned kernel", spec.Name)
+	}
+	if !spec.IsPartitioned && kr.IsPartitioned && spec.Direction != builder.DirectionScalar && !spec.IsMatrix {
+		return fmt.Errorf("non-partitioned array %s provided to partitioned kernel", spec.Name)
+	}
+	if spec.IsPartitioned && spec.PartitionCount != kr.NumPartitions {
+		return fmt.Errorf("partition count mismatch for %s: expected %d, got %d",
+			spec.Name, kr.NumPartitions, spec.PartitionCount)
+	}
 	switch spec.Direction {
 	case builder.DirectionScalar:
 		// Scalars don't need allocation, just type checking

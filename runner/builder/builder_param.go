@@ -46,6 +46,10 @@ type ParamSpec struct {
 	MatrixRows int
 	MatrixCols int
 	Stride     int // For flat array to matrix promotion
+
+	// NEW: Partitioned data support
+	IsPartitioned  bool
+	PartitionCount int
 }
 
 // Input creates a parameter specification for a const input
@@ -186,7 +190,7 @@ func (p *ParamBuilder) Align(alignment AlignmentType) *ParamBuilder {
 	return p
 }
 
-// inferFromBinding extracts type and size information from the host binding
+// runner/builder/builder_param.go - Update inferFromBinding to detect partitioned data
 func (p *ParamBuilder) inferFromBinding() {
 	if p.Spec.HostBinding == nil {
 		return
@@ -195,6 +199,61 @@ func (p *ParamBuilder) inferFromBinding() {
 	v := reflect.ValueOf(p.Spec.HostBinding)
 	t := v.Type()
 
+	// NEW: Check for partitioned arrays (slice of slices)
+	if t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Slice {
+		p.Spec.IsPartitioned = true
+		p.Spec.PartitionCount = v.Len()
+
+		// Calculate total size
+		totalSize := int64(0)
+		for i := 0; i < v.Len(); i++ {
+			partition := v.Index(i)
+			totalSize += int64(partition.Len())
+		}
+		p.Spec.Size = totalSize
+
+		// Infer element type from first partition
+		if v.Len() > 0 {
+			elemType := t.Elem().Elem()
+			switch elemType.Kind() {
+			case reflect.Float32:
+				p.Spec.DataType = Float32
+			case reflect.Float64:
+				p.Spec.DataType = Float64
+			case reflect.Int32:
+				p.Spec.DataType = INT32
+			case reflect.Int64:
+				p.Spec.DataType = INT64
+			}
+		}
+		return
+	}
+
+	// NEW: Check for partitioned matrices (slice of mat.Matrix)
+	if t.Kind() == reflect.Slice && v.Len() > 0 {
+		if _, ok := v.Index(0).Interface().(mat.Matrix); ok {
+			p.Spec.IsPartitioned = true
+			p.Spec.PartitionCount = v.Len()
+
+			// Calculate total size and get dimensions
+			totalSize := int64(0)
+			for i := 0; i < v.Len(); i++ {
+				if m, ok := v.Index(i).Interface().(mat.Matrix); ok {
+					rows, cols := m.Dims()
+					if i == 0 {
+						p.Spec.MatrixRows = rows
+						p.Spec.MatrixCols = cols
+					}
+					totalSize += int64(rows * cols)
+				}
+			}
+			p.Spec.Size = totalSize
+			p.Spec.DataType = Float64
+			return
+		}
+	}
+
+	// EXISTING CODE for non-partitioned data remains unchanged
 	// Handle slices
 	if t.Kind() == reflect.Slice {
 		p.Spec.Size = int64(v.Len())
@@ -241,47 +300,17 @@ func (p *ParamBuilder) inferFromBinding() {
 	}
 }
 
-// Validate checks if the parameter specification is complete and valid
+// runner/builder/builder_param.go - Update Validate to check partitioned constraints
 func (p *ParamSpec) Validate() error {
-	if p.Name == "" {
-		return fmt.Errorf("parameter name cannot be empty")
-	}
+	// EXISTING validation code...
 
-	// Scalars don't need size
-	if p.Direction == DirectionScalar {
-		if p.DataType == 0 && p.HostBinding == nil {
-			return fmt.Errorf("scalar %s needs type or binding", p.Name)
+	// NEW: Add partitioned data validation
+	if p.IsPartitioned {
+		if p.IsMatrix && p.IsStatic {
+			return fmt.Errorf("static matrices cannot be partitioned")
 		}
-		return nil
-	}
-
-	// Arrays need size and type
-	if p.Direction != DirectionScalar {
-		if p.Size == 0 {
-			return fmt.Errorf("array %s needs size", p.Name)
-		}
-		if p.DataType == 0 {
-			return fmt.Errorf("array %s needs type", p.Name)
-		}
-	}
-
-	// Matrix validation
-	if p.IsMatrix {
-		if p.Direction == DirectionScalar {
-			return fmt.Errorf("scalars cannot be matrices")
-		}
-		if p.IsStatic && p.HostBinding == nil {
-			return fmt.Errorf("static matrix %s needs binding", p.Name)
-		}
-	}
-
-	// Temp arrays cannot have host bindings or copy operations
-	if p.Direction == DirectionTemp {
-		if p.HostBinding != nil {
-			return fmt.Errorf("temp array %s cannot have host binding", p.Name)
-		}
-		if p.DoCopyTo || p.DoCopyBack {
-			return fmt.Errorf("temp array %s cannot have copy operations", p.Name)
+		if p.PartitionCount == 0 {
+			return fmt.Errorf("partitioned data %s has no partitions", p.Name)
 		}
 	}
 

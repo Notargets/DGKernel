@@ -19,6 +19,7 @@ type Runner struct {
 	// New fields for parameter API
 	kernelDefinitions map[string]*KernelDefinition
 	hostBindings      map[string]interface{}
+	IsPartitioned     bool // NEW: Track if kernel uses partitioned data
 }
 
 // ArrayMetadata tracks information about allocated arrays
@@ -51,6 +52,7 @@ func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
 		Device:        device,
 		Kernels:       make(map[string]*gocca.OCCAKernel),
 		PooledMemory:  make(map[string]*gocca.OCCAMemory),
+		IsPartitioned: len(Config.K) > 1, // NEW: Set based on partition count
 	}
 	kMem := device.Malloc(int64(len(bld.K)*intSize), unsafe.Pointer(&bld.K[0]),
 		nil)
