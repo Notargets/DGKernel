@@ -176,110 +176,35 @@ func TestDGKernel_CodeGen_MatrixMacroStructure(t *testing.T) {
 }
 
 // ============================================================================
-// Section 3: Memory Allocation Tests
-// Following Unit Testing Principle: Test specific properties
+// Section 3: Kernel Execution Tests with New API
 // ============================================================================
 
-// Test 3.1: Single array allocation
-func TestDGKernel_Memory_SingleArrayAllocation(t *testing.T) {
+// Test 3.1: Basic kernel with new API
+func TestDGKernel_NewAPI_BasicKernel(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{K: []int{10}})
 	defer kp.Free()
 
-	spec := builder.ArraySpec{
-		Name:      "data",
-		Size:      10 * 8,
-		Alignment: builder.NoAlignment,
-		DataType:  builder.Float64,
+	// Host data
+	hostData := make([]float64, 10)
+	for i := range hostData {
+		hostData[i] = float64(i)
 	}
 
-	err := kp.AllocateArrays([]builder.ArraySpec{spec})
+	// Define kernel with new API
+	err := kp.DefineKernel("setValues",
+		builder.InOut("data").Bind(hostData).Copy(),
+	)
 	if err != nil {
-		t.Fatalf("Failed to allocate: %v", err)
+		t.Fatalf("Failed to define kernel: %v", err)
 	}
 
-	// Verify allocation exists
-	mem := kp.GetMemory("data")
-	if mem == nil {
-		t.Error("Memory not allocated")
-	}
+	// Get signature
+	signature, _ := kp.GetKernelSignature("setValues")
 
-	// Verify offsets exist
-	offsets := kp.GetOffsets("data")
-	if offsets == nil {
-		t.Error("Offsets not allocated")
-	}
-
-	arrays := kp.GetAllocatedArrays()
-	if len(arrays) != 1 || arrays[0] != "data" {
-		t.Errorf("Expected allocated arrays [data], got %v", arrays)
-	}
-}
-
-// Test 3.2: Multiple array allocation
-func TestDGKernel_Memory_MultipleArrayAllocation(t *testing.T) {
-	device := utils.CreateTestDevice()
-	defer device.Free()
-
-	k := []int{10, 15, 20}
-	totalElements := 45
-
-	kp := NewRunner(device, builder.Config{K: k})
-	defer kp.Free()
-
-	specs := []builder.ArraySpec{
-		{Name: "U", Size: int64(totalElements * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
-		{Name: "V", Size: int64(totalElements * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
-		{Name: "W", Size: int64(totalElements * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
-	}
-
-	err := kp.AllocateArrays(specs)
-	if err != nil {
-		t.Fatalf("Failed to allocate: %v", err)
-	}
-
-	// Verify all allocations
-	expectedArrays := []string{"U", "V", "W"}
-	arrays := kp.GetAllocatedArrays()
-
-	if len(arrays) != len(expectedArrays) {
-		t.Errorf("Expected %d arrays, got %d", len(expectedArrays), len(arrays))
-	}
-
-	for _, name := range expectedArrays {
-		if kp.GetMemory(name) == nil {
-			t.Errorf("Memory for %s not allocated", name)
-		}
-		if kp.GetOffsets(name) == nil {
-			t.Errorf("Offsets for %s not allocated", name)
-		}
-	}
-}
-
-// ============================================================================
-// Section 4: Kernel Operations Tests
-// Following Unit Testing Principle: Test operations
-// ============================================================================
-
-// Test 4.1: Basic kernel build and execution
-func TestDGKernel_Execution_BasicKernel(t *testing.T) {
-	device := utils.CreateTestDevice()
-	defer device.Free()
-
-	kp := NewRunner(device, builder.Config{K: []int{10}})
-	defer kp.Free()
-
-	// Allocate simple array
-	err := kp.AllocateArrays([]builder.ArraySpec{
-		{Name: "data", Size: 10 * 8, DataType: builder.Float64, Alignment: builder.NoAlignment, IsOutput: true},
-	})
-	if err != nil {
-		t.Fatalf("Failed to allocate: %v", err)
-	}
-
-	// Simple kernel that sets values
+	// Simple kernel that squares values
 	kernelSource := fmt.Sprintf(`
 @kernel void setValues(
 	%s
@@ -289,40 +214,34 @@ func TestDGKernel_Execution_BasicKernel(t *testing.T) {
        
        for (int i = 0; i < KpartMax; ++i; @inner) {
           if (i < K[part]) {
-             data[i] = (real_t)i;
+             data[i] = data[i] * data[i];
           }
        }
     }
-}`, kp.GenerateKernelSignature())
+}`, signature)
 
-	kernel, err := kp.BuildKernel(kernelSource, "setValues")
+	_, err = kp.BuildKernel(kernelSource, "setValues")
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	if kernel == nil {
-		t.Error("Kernel is nil")
-	}
-
 	// Execute kernel
-	err = kp.RunKernel("setValues", "data")
+	err = kp.RunKernel("setValues")
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
-	// Verify results
-	result := make([]float64, 10)
-	kp.GetMemory("data").CopyTo(unsafe.Pointer(&result[0]), 10*8)
-
+	// Verify results - data should be squared
 	for i := 0; i < 10; i++ {
-		if math.Abs(result[i]-float64(i)) > 1e-10 {
-			t.Errorf("Element %d: expected %f, got %f", i, float64(i), result[i])
+		expected := float64(i * i)
+		if math.Abs(hostData[i]-expected) > 1e-10 {
+			t.Errorf("Element %d: expected %f, got %f", i, expected, hostData[i])
 		}
 	}
 }
 
-// Test 4.2: Kernel execution with matrix operation
-func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
+// Test 3.2: Matrix operations with new API
+func TestDGKernel_NewAPI_MatrixOperation(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -343,25 +262,25 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 		0.0, -1.0, 0.0, 1.0,
 		0.0, 1.0, -3.0, 2.0,
 	})
-	kp.AddStaticMatrix("Dr", Dr)
-
-	// Allocate arrays
-	specs := []builder.ArraySpec{
-		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64, Alignment: builder.NoAlignment},
-		{Name: "Ur", Size: int64(totalNodes * 8), DataType: builder.Float64,
-			Alignment: builder.NoAlignment, IsOutput: true},
-	}
-	err := kp.AllocateArrays(specs)
-	if err != nil {
-		t.Fatalf("Failed to allocate: %v", err)
-	}
 
 	// Initialize test data
 	U := make([]float64, totalNodes)
+	Ur := make([]float64, totalNodes)
 	for i := range U {
 		U[i] = float64(i % 10)
 	}
-	kp.GetMemory("U").CopyFrom(unsafe.Pointer(&U[0]), int64(totalNodes*8))
+
+	// Define kernel with new API
+	err := kp.DefineKernel("differentiate",
+		builder.Input("Dr").Bind(Dr).ToMatrix().Static(),
+		builder.Input("U").Bind(U).CopyTo(),
+		builder.Output("Ur").Bind(Ur),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
+	}
+
+	signature, _ := kp.GetKernelSignature("differentiate")
 
 	// Kernel using differentiation matrix
 	kernelSource := fmt.Sprintf(`
@@ -376,7 +295,7 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 		MATMUL_Dr(U, Ur, K[part]);
 	}
 }
-`, np, kp.GenerateKernelSignature())
+`, np, signature)
 
 	_, err = kp.BuildKernel(kernelSource, "differentiate")
 	if err != nil {
@@ -384,14 +303,16 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 	}
 
 	// Execute differentiation
-	err = kp.RunKernel("differentiate", "U", "Ur")
+	err = kp.RunKernel("differentiate")
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
 	// Verify results make sense (not checking exact values, just sanity)
-	result := make([]float64, totalNodes)
-	kp.GetMemory("Ur").CopyTo(unsafe.Pointer(&result[0]), int64(totalNodes*8))
+	result, err := CopyArrayToHost[float64](kp, "Ur")
+	if err != nil {
+		t.Fatalf("Failed to copy result: %v", err)
+	}
 
 	// Check that we got non-zero results
 	hasNonZero := false
@@ -406,144 +327,87 @@ func TestDGKernel_Execution_MatrixOperation(t *testing.T) {
 	}
 }
 
-// Test 4.3: Kernel execution with identity matrix
-func TestDGKernel_Execution_IdentityMatrix(t *testing.T) {
+// Test 3.3: Multiple arrays with new API
+func TestDGKernel_NewAPI_MultipleArrays(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
-	np := 3
-	k := []int{2, 3}
-	totalNodes := 5 * np
+	k := []int{10, 15, 20}
+	totalElements := 45
 
-	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
-	})
+	kp := NewRunner(device, builder.Config{K: k})
 	defer kp.Free()
 
-	// Add identity matrix for simple testing
-	I := mat.NewDense(np, np, []float64{
-		1, 0, 0,
-		0, 1, 0,
-		0, 0, 1,
-	})
-	kp.AddStaticMatrix("I", I)
+	// Initialize host arrays
+	hostU := make([]float64, totalElements)
+	hostV := make([]float64, totalElements)
+	hostW := make([]float64, totalElements)
 
-	// Allocate arrays
-	specs := []builder.ArraySpec{
-		{Name: "U", Size: int64(totalNodes * 8), DataType: builder.Float64},
-		{Name: "V", Size: int64(totalNodes * 8), DataType: builder.Float64, IsOutput: true},
+	for i := range hostU {
+		hostU[i] = float64(i)
+		hostV[i] = float64(i * 2)
 	}
-	err := kp.AllocateArrays(specs)
+
+	// Define kernel with new API
+	err := kp.DefineKernel("vectorOps",
+		builder.Input("U").Bind(hostU).CopyTo(),
+		builder.Input("V").Bind(hostV).CopyTo(),
+		builder.Output("W").Bind(hostW),
+	)
 	if err != nil {
-		t.Fatalf("Failed to allocate: %v", err)
+		t.Fatalf("Failed to define kernel: %v", err)
 	}
 
-	// Initialize U with test data
-	U := make([]float64, totalNodes)
-	for i := range U {
-		U[i] = float64(i)
-	}
+	signature, _ := kp.GetKernelSignature("vectorOps")
 
-	kp.GetMemory("U").CopyFrom(unsafe.Pointer(&U[0]), int64(totalNodes*8))
-
-	// Kernel using MATMUL macro with @inner
+	// Kernel that adds vectors
 	kernelSource := fmt.Sprintf(`
-#define NP %d
-
-@kernel void applyIdentity(
+@kernel void vectorOps(
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		const real_t* U = U_PART(part);
-		real_t* V = V_PART(part);
-		MATMUL_I(U, V, K[part]);
+		const real_t* V = V_PART(part);
+		real_t* W = W_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				W[i] = U[i] + V[i];
+			}
+		}
 	}
-}
-`, np, kp.GenerateKernelSignature())
+}`, signature)
 
-	_, err = kp.BuildKernel(kernelSource, "applyIdentity")
+	_, err = kp.BuildKernel(kernelSource, "vectorOps")
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	err = kp.RunKernel("applyIdentity", "U", "V")
+	// Execute kernel
+	err = kp.RunKernel("vectorOps")
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
-	// Verify result (identity matrix should copy U to V)
-	result, err := CopyArrayToHost[float64](kp, "V")
+	// Verify results
+	result, err := CopyArrayToHost[float64](kp, "W")
 	if err != nil {
 		t.Fatalf("Failed to copy result: %v", err)
 	}
 
-	// Verify each element
-	if len(result) != totalNodes {
-		t.Errorf("Expected %d nodes, got %d", totalNodes, len(result))
-	}
-
-	for i := 0; i < totalNodes; i++ {
-		if math.Abs(result[i]-U[i]) > 1e-10 {
-			t.Errorf("Element %d: expected %f, got %f", i, U[i], result[i])
+	for i := 0; i < totalElements; i++ {
+		expected := hostU[i] + hostV[i]
+		if math.Abs(result[i]-expected) > 1e-10 {
+			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
 		}
 	}
 }
 
 // ============================================================================
-// Section 5: Incremental Complexity Tests
-// Following Unit Testing Principle: Progressive complexity
+// Section 4: Edge Cases and Degeneracies
 // ============================================================================
 
-// Test 5.1: Systematic partition count increase
-func TestDGKernel_Incremental_PartitionScaling(t *testing.T) {
-	device := utils.CreateTestDevice()
-	defer device.Free()
-
-	// Test increasing partition counts
-	for numParts := 1; numParts <= 8; numParts++ {
-		t.Run(fmt.Sprintf("%dPartitions", numParts), func(t *testing.T) {
-			// Create K array with variable sizes
-			k := make([]int, numParts)
-			for i := 0; i < numParts; i++ {
-				k[i] = 10 + i*5 // Variable sizes: 10, 15, 20, ...
-			}
-
-			kp := NewRunner(device, builder.Config{K: k})
-			defer kp.Free()
-
-			// Verify KpartMax is correct
-			expectedKMax := 10 + (numParts-1)*5
-			if kp.KpartMax != expectedKMax {
-				t.Errorf("Expected KpartMax=%d, got %d", expectedKMax, kp.KpartMax)
-			}
-
-			// Test basic allocation succeeds
-			totalElements := 0
-			for _, v := range k {
-				totalElements += v
-			}
-
-			spec := builder.ArraySpec{
-				Name:      "test",
-				Size:      int64(totalElements * 8),
-				Alignment: builder.NoAlignment,
-				DataType:  builder.Float64,
-			}
-			err := kp.AllocateArrays([]builder.ArraySpec{spec})
-			if err != nil {
-				t.Errorf("Allocation failed for %d partitions: %v", numParts, err)
-			}
-		})
-	}
-}
-
-// ============================================================================
-// Section 6: Edge Cases and Degeneracies
-// Following Unit Testing Principle: Test edge cases
-// ============================================================================
-
-// Test 6.1: Degenerate partition configurations
+// Test 4.1: Degenerate partition configurations
 func TestDGKernel_EdgeCases_DegeneratePartitions(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
@@ -578,11 +442,10 @@ func TestDGKernel_EdgeCases_DegeneratePartitions(t *testing.T) {
 }
 
 // ============================================================================
-// Section 7: Mathematical Properties Verification
-// Following Unit Testing Principle: Test arithmetic correctness
+// Section 5: Mathematical Properties Verification
 // ============================================================================
 
-// Test 7.1: Offset calculations preserve total size
+// Test 5.1: Offset calculations with new API
 func TestDGKernel_MathProperties_OffsetCalculations(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
@@ -593,21 +456,28 @@ func TestDGKernel_MathProperties_OffsetCalculations(t *testing.T) {
 	kp := NewRunner(device, builder.Config{K: k})
 	defer kp.Free()
 
-	spec := builder.ArraySpec{
-		Name:      "data",
-		Size:      int64(totalElements * 8),
-		Alignment: builder.NoAlignment,
-		DataType:  builder.Float64,
+	// Create host data
+	hostData := make([]float64, totalElements)
+
+	// Define kernel to trigger array allocation
+	err := kp.DefineKernel("test",
+		builder.Input("data").Bind(hostData).CopyTo(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
 	}
 
-	offsets, totalSize := kp.CalculateAlignedOffsetsAndSize(spec)
-
-	// Verify offset calculation properties
-	if len(offsets) != len(k)+1 {
-		t.Errorf("Expected %d offsets, got %d", len(k)+1, len(offsets))
+	// Check that offsets were created correctly
+	offsetsMem := kp.GetOffsets("data")
+	if offsetsMem == nil {
+		t.Fatal("Offsets not allocated")
 	}
 
-	// First offset should be 0
+	// Read offsets back
+	offsets := make([]int64, kp.NumPartitions+1)
+	offsetsMem.CopyTo(unsafe.Pointer(&offsets[0]), int64(len(offsets)*8))
+
+	// Verify offset properties
 	if offsets[0] != 0 {
 		t.Errorf("First offset should be 0, got %d", offsets[0])
 	}
@@ -619,8 +489,11 @@ func TestDGKernel_MathProperties_OffsetCalculations(t *testing.T) {
 		}
 	}
 
-	// Total size should match request (with possible alignment padding)
-	if totalSize < spec.Size {
-		t.Errorf("Total size %d less than requested %d", totalSize, spec.Size)
+	// Check partition sizes match K values
+	for i := 0; i < kp.NumPartitions; i++ {
+		partSize := offsets[i+1] - offsets[i]
+		if partSize != int64(k[i]) {
+			t.Errorf("Partition %d size mismatch: expected %d, got %d", i, k[i], partSize)
+		}
 	}
 }
