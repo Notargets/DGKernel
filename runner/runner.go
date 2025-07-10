@@ -96,6 +96,10 @@ func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) erro
 	if err := kernel.RunWithArgs(args...); err != nil {
 		return fmt.Errorf("kernel execution failed: %w", err)
 	}
+	if kr.Device.Mode() == "CUDA" {
+		fmt.Println("Here...")
+		kr.Device.Finish() // or Sync()
+	}
 
 	// Perform post-kernel data copies (device→host)
 	if err := kr.performPostKernelCopies(def); err != nil {
