@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gonum.org/v1/gonum/mat"
 	"math"
-	"os"
 	"sort"
 	"testing"
 )
@@ -460,7 +459,7 @@ func TestSplitMatrix(t *testing.T) {
 		[]float64{5, 7, 9, 6, 8, 10}, 1.e-8, "")
 }
 
-func _TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
+func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	order := 4
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Ktot := tn.K
@@ -495,15 +494,6 @@ func _TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		for _, n := range pNames {
 			k = append(k, partitionCounts[n])
 		}
-		UU := make([]float64, elementSum)
-		for i := range UU {
-			UU[i] = float64(i)
-		}
-		UUU := splitSlice(k, UU)
-		for i := range k {
-			fmt.Printf("Partition %d: %v\n", i, UUU[i])
-		}
-		os.Exit(1)
 	} else {
 		k = []int{Ktot}
 	}
@@ -528,7 +518,7 @@ func _TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
 	}
 
-	U := mat.NewDense(Np, Ktot, nil)
+	Uw := mat.NewDense(Np, Ktot, nil)
 	DuDxExpected := mat.NewDense(Np, Ktot, nil)
 	DuDyExpected := mat.NewDense(Np, Ktot, nil)
 	DuDzExpected := mat.NewDense(Np, Ktot, nil)
@@ -537,7 +527,7 @@ func _TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		for j := 0; j < Np; j++ {
 			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
 			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
-			U.Set(j, K, xP+yP+zP)
+			Uw.Set(j, K, xP+yP+zP)
 			dxP := float64(fOrder) * math.Pow(x, fOrder-1)
 			dyP := float64(fOrder) * math.Pow(y, fOrder-1)
 			dzP := float64(fOrder) * math.Pow(z, fOrder-1)
@@ -549,21 +539,25 @@ func _TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 
 	// Use matrices for the host output to get the automatic conversion to
 	// row-major storage format
-	DuDx := mat.NewDense(Np, Ktot, nil)
-	DuDy := mat.NewDense(Np, Ktot, nil)
-	DuDz := mat.NewDense(Np, Ktot, nil)
+	DuDx := splitMatrix(k, mat.NewDense(Np, Ktot, nil))
+	DuDy := splitMatrix(k, mat.NewDense(Np, Ktot, nil))
+	DuDz := splitMatrix(k, mat.NewDense(Np, Ktot, nil))
+	U := splitMatrix(k, Uw)
+	Rx, Ry, Rz := splitMatrix(k, tn.Rx), splitMatrix(k, tn.Ry), splitMatrix(k, tn.Rz)
+	Sx, Sy, Sz := splitMatrix(k, tn.Sx), splitMatrix(k, tn.Sy), splitMatrix(k, tn.Sz)
+	Tx, Ty, Tz := splitMatrix(k, tn.Tx), splitMatrix(k, tn.Ty), splitMatrix(k, tn.Tz)
 	// Add array parameters
 	params = append(params,
 		builder.Input("U").Bind(U).CopyTo(),
-		builder.Input("Rx").Bind(tn.Rx).CopyTo(),
-		builder.Input("Sx").Bind(tn.Sx).CopyTo(),
-		builder.Input("Tx").Bind(tn.Tx).CopyTo(),
-		builder.Input("Ry").Bind(tn.Ry).CopyTo(),
-		builder.Input("Sy").Bind(tn.Sy).CopyTo(),
-		builder.Input("Ty").Bind(tn.Ty).CopyTo(),
-		builder.Input("Rz").Bind(tn.Rz).CopyTo(),
-		builder.Input("Sz").Bind(tn.Sz).CopyTo(),
-		builder.Input("Tz").Bind(tn.Tz).CopyTo(),
+		builder.Input("Rx").Bind(Rx).CopyTo(),
+		builder.Input("Sx").Bind(Sx).CopyTo(),
+		builder.Input("Tx").Bind(Tx).CopyTo(),
+		builder.Input("Ry").Bind(Ry).CopyTo(),
+		builder.Input("Sy").Bind(Sy).CopyTo(),
+		builder.Input("Ty").Bind(Ty).CopyTo(),
+		builder.Input("Rz").Bind(Rz).CopyTo(),
+		builder.Input("Sz").Bind(Sz).CopyTo(),
+		builder.Input("Tz").Bind(Tz).CopyTo(),
 		builder.Output("DuDx").Bind(DuDx).CopyBack(),
 		builder.Output("DuDy").Bind(DuDy).CopyBack(),
 		builder.Output("DuDz").Bind(DuDz).CopyBack(),
@@ -633,7 +627,7 @@ func _TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
-	DuDxH, DuDyH, DuDzH := calcPhysicalDerivative(U, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
+	DuDxH, DuDyH, DuDzH := calcPhysicalDerivative(Uw, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
 		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
 
 	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDxH, 1.e-8, "")
@@ -641,9 +635,21 @@ func _TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzH, 1.e-8, "")
 	fmt.Println("Host calculation of physical derivative validates")
 
-	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDx.RawMatrix().Data, 1.e-8, "")
-	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDy.RawMatrix().Data, 1.e-8, "")
-	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDz.RawMatrix().Data, 1.e-8, "")
+	DuDxXp := splitMatrix(k, DuDxExpected)
+	DuDyXp := splitMatrix(k, DuDyExpected)
+	DuDzXp := splitMatrix(k, DuDzExpected)
+	for i := range DuDxXp {
+		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDzXp[i]).RawMatrix().Data,
+			mat.DenseCopyOf(DuDz[i]).RawMatrix().Data, 1.e-8, "")
+	}
+	for i := range DuDxXp {
+		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDxXp[i]).RawMatrix().Data,
+			mat.DenseCopyOf(DuDx[i]).RawMatrix().Data, 1.e-8, "")
+	}
+	for i := range DuDxXp {
+		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDyXp[i]).RawMatrix().Data,
+			mat.DenseCopyOf(DuDy[i]).RawMatrix().Data, 1.e-8, "")
+	}
 	fmt.Println("Device calculation of physical derivative validates")
 }
 

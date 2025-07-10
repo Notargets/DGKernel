@@ -58,7 +58,10 @@ func (kr *Runner) processParameter(spec *builder.ParamSpec) error {
 	if spec.IsPartitioned && !kr.IsPartitioned {
 		return fmt.Errorf("partitioned data %s provided to non-partitioned kernel", spec.Name)
 	}
-	if !spec.IsPartitioned && kr.IsPartitioned && spec.Direction != builder.DirectionScalar && !spec.IsMatrix {
+	if !spec.IsPartitioned && kr.IsPartitioned &&
+		spec.Direction != builder.DirectionScalar &&
+		spec.Direction != builder.DirectionTemp &&
+		!spec.IsMatrix {
 		return fmt.Errorf("non-partitioned array %s provided to partitioned kernel", spec.Name)
 	}
 	if spec.IsPartitioned && spec.PartitionCount != kr.NumPartitions {
