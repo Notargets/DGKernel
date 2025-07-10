@@ -352,113 +352,6 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	fmt.Println("Device calculation of physical derivative validates")
 }
 
-func getMatrixData(m mat.Matrix) []float64 {
-	switch v := m.(type) {
-	case *mat.Dense:
-		return v.RawMatrix().Data
-
-	case *mat.VecDense:
-		return v.RawVector().Data
-
-	case *mat.SymDense:
-		return v.RawSymmetric().Data
-
-	case *mat.TriDense:
-		return v.RawTriangular().Data
-
-	default:
-		dense := mat.DenseCopyOf(m)
-		return dense.RawMatrix().Data
-	}
-}
-
-func splitMatrix(splits []int, matrix mat.Matrix) (splitMat []mat.Matrix) {
-	// Total of two data copies used in this transform, resulting in a split
-	var (
-		rows, _ = matrix.Dims()
-	)
-	// This makes one copy of the matrix data within getMatrixData after .T()
-	// The splitData slice of slices stores addresses of split regions
-	splitData := splitSlice(splits, getMatrixData(matrix.T()))
-	splitMat = make([]mat.Matrix, len(splits))
-	for i, K := range splits {
-		// This makes another copy of the data after .T()
-		// The end result of this is a matrix split on columns in row-major form
-		splitMat[i] = mat.DenseCopyOf(mat.NewDense(K, rows, splitData[i]).T())
-	}
-	return
-}
-
-func splitSlice(splits []int, slice []float64) (splitSlice [][]float64) {
-	var (
-		total int
-	)
-	for _, k := range splits {
-		total += k
-	}
-	if len(slice)%total != 0 {
-		fmt.Printf("len(slice) = %d, total = %d\n", len(slice), total)
-		panic("split slice is not a multiple of len(slice)")
-	}
-	stride := len(slice) / total
-	splitSlice = make([][]float64, len(splits))
-	var iii int
-	for i, K := range splits {
-		// This avoids a copy by just storing the addresses
-		splitSlice[i] = slice[iii : iii+K*stride]
-		iii += K * stride
-	}
-	return
-}
-
-func printMatrix(m mat.Matrix) (out string) {
-	rows, cols := m.Dims()
-
-	for i := 0; i < rows; i++ {
-		out += fmt.Sprintf("[")
-		for j := 0; j < cols; j++ {
-			out += fmt.Sprintf("%8.3f", m.At(i, j))
-			if j < cols-1 {
-				out += fmt.Sprintf(" ")
-			}
-		}
-		out += fmt.Sprintf("]\n")
-	}
-	return
-}
-
-func TestSplitMatrix(t *testing.T) {
-	/*
-		We start with a 2,5 rank matrix, with each column sequential:
-		[   1.000    3.000    5.000    7.000    9.000]
-		[   2.000    4.000    6.000    8.000   10.000]
-
-		The split version should look like two pieces of the same matrix:
-		Mat 0
-		[   1.000    3.000]
-		[   2.000    4.000]
-		Mat 1
-		[   5.000    7.000    9.000]
-		[   6.000    8.000   10.000]
-	*/
-	kk := []int{2, 3}
-	mm := mat.NewDense(2, 5, []float64{1, 3, 5, 7, 9, 2, 4, 6, 8, 10})
-	splitMs := splitMatrix(kk, mm)
-	if testing.Verbose() {
-		fmt.Printf("%s", printMatrix(mm))
-		// printMatrix(mm.T())
-		for i, m := range splitMs {
-			fmt.Printf("Mat %d\n", i)
-			fmt.Printf("%s", printMatrix(m))
-		}
-	}
-
-	assert.InDeltaSlicef(t, splitMs[0].(*mat.Dense).RawMatrix().Data,
-		[]float64{1, 3, 2, 4}, 1.e-8, "")
-	assert.InDeltaSlicef(t, splitMs[1].(*mat.Dense).RawMatrix().Data,
-		[]float64{5, 7, 9, 6, 8, 10}, 1.e-8, "")
-}
-
 func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	order := 4
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
@@ -600,11 +493,10 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
         const real_t* Rz = Rz_PART(part);
         const real_t* Sz = Sz_PART(part);
         const real_t* Tz = Tz_PART(part);
-		// Single partition means we can safely use KpartMax as K[part]
         // ************************************************************
 		// *** This computation is happening in column-major format ***
         // ************************************************************
-		// for (int i = 0; i < NP*KpartMax; ++i; @inner) {
+		// Multiple partitions means we need to check bounds
 		for (int i = 0; i < NP*K[part]; ++i; @inner) {
     		if (i < NP*K[part]) {
 				DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
@@ -681,4 +573,111 @@ func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
 	// ************* DuDx... are in row-major format **************
 	// ************************************************************
 	return
+}
+
+func getMatrixData(m mat.Matrix) []float64 {
+	switch v := m.(type) {
+	case *mat.Dense:
+		return v.RawMatrix().Data
+
+	case *mat.VecDense:
+		return v.RawVector().Data
+
+	case *mat.SymDense:
+		return v.RawSymmetric().Data
+
+	case *mat.TriDense:
+		return v.RawTriangular().Data
+
+	default:
+		dense := mat.DenseCopyOf(m)
+		return dense.RawMatrix().Data
+	}
+}
+
+func splitMatrix(splits []int, matrix mat.Matrix) (splitMat []mat.Matrix) {
+	// Total of two data copies used in this transform, resulting in a split
+	var (
+		rows, _ = matrix.Dims()
+	)
+	// This makes one copy of the matrix data within getMatrixData after .T()
+	// The splitData slice of slices stores addresses of split regions
+	splitData := splitSlice(splits, getMatrixData(matrix.T()))
+	splitMat = make([]mat.Matrix, len(splits))
+	for i, K := range splits {
+		// This makes another copy of the data after .T()
+		// The end result of this is a matrix split on columns in row-major form
+		splitMat[i] = mat.DenseCopyOf(mat.NewDense(K, rows, splitData[i]).T())
+	}
+	return
+}
+
+func splitSlice(splits []int, slice []float64) (splitSlice [][]float64) {
+	var (
+		total int
+	)
+	for _, k := range splits {
+		total += k
+	}
+	if len(slice)%total != 0 {
+		fmt.Printf("len(slice) = %d, total = %d\n", len(slice), total)
+		panic("split slice is not a multiple of len(slice)")
+	}
+	stride := len(slice) / total
+	splitSlice = make([][]float64, len(splits))
+	var iii int
+	for i, K := range splits {
+		// This avoids a copy by just storing the addresses
+		splitSlice[i] = slice[iii : iii+K*stride]
+		iii += K * stride
+	}
+	return
+}
+
+func printMatrix(m mat.Matrix) (out string) {
+	rows, cols := m.Dims()
+
+	for i := 0; i < rows; i++ {
+		out += fmt.Sprintf("[")
+		for j := 0; j < cols; j++ {
+			out += fmt.Sprintf("%8.3f", m.At(i, j))
+			if j < cols-1 {
+				out += fmt.Sprintf(" ")
+			}
+		}
+		out += fmt.Sprintf("]\n")
+	}
+	return
+}
+
+func TestSplitMatrix(t *testing.T) {
+	/*
+		We start with a 2,5 rank matrix, with each column sequential:
+		[   1.000    3.000    5.000    7.000    9.000]
+		[   2.000    4.000    6.000    8.000   10.000]
+
+		The split version should look like two pieces of the same matrix:
+		Mat 0
+		[   1.000    3.000]
+		[   2.000    4.000]
+		Mat 1
+		[   5.000    7.000    9.000]
+		[   6.000    8.000   10.000]
+	*/
+	kk := []int{2, 3}
+	mm := mat.NewDense(2, 5, []float64{1, 3, 5, 7, 9, 2, 4, 6, 8, 10})
+	splitMs := splitMatrix(kk, mm)
+	if testing.Verbose() {
+		fmt.Printf("%s", printMatrix(mm))
+		// printMatrix(mm.T())
+		for i, m := range splitMs {
+			fmt.Printf("Mat %d\n", i)
+			fmt.Printf("%s", printMatrix(m))
+		}
+	}
+
+	assert.InDeltaSlicef(t, splitMs[0].(*mat.Dense).RawMatrix().Data,
+		[]float64{1, 3, 2, 4}, 1.e-8, "")
+	assert.InDeltaSlicef(t, splitMs[1].(*mat.Dense).RawMatrix().Data,
+		[]float64{5, 7, 9, 6, 8, 10}, 1.e-8, "")
 }
