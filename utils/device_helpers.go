@@ -6,16 +6,24 @@ import (
 )
 
 // CreateTestDevice creates a Device for testing, preferring parallel backends
-func CreateTestDevice() *gocca.OCCADevice {
+func CreateTestDevice(useCudaO ...bool) *gocca.OCCADevice {
+	var useCuda bool
+	if len(useCudaO) > 0 {
+		useCuda = useCudaO[0]
+	}
 	// Try OpenCL with different JSON formats, then OpenMP, then CUDA, then fall back to Serial
-	backends := []string{
-		// Try without quotes around numbers
-		// `{mode: 'OpenCL', platform_id: 0, device_id: 0}`,
-		// Original OpenMP
-		// `{"mode": "OpenMP", "kernel": {{"compiler_flags": "-O3"}}}`,
-		`{"mode": "OpenMP"}`,
-		`{"mode": "CUDA", "device_id": 0}`,
-		`{"mode": "Serial"}`,
+	var backends []string
+	if useCuda {
+		backends = []string{
+			`{"mode": "CUDA", "device_id": 0}`,
+			`{"mode": "OpenMP"}`,
+			`{"mode": "Serial"}`,
+		}
+	} else {
+		backends = []string{
+			`{"mode": "OpenMP"}`,
+			`{"mode": "Serial"}`,
+		}
 	}
 
 	for _, props := range backends {
