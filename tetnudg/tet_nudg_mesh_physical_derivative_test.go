@@ -604,10 +604,13 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
         // ************************************************************
 		// *** This computation is happening in column-major format ***
         // ************************************************************
-		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
-			DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
-			DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
-			DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
+		// for (int i = 0; i < NP*KpartMax; ++i; @inner) {
+		for (int i = 0; i < NP*K[part]; ++i; @inner) {
+    		if (i < NP*K[part]) {
+				DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
+				DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
+				DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
+			}
 		}
         // ************************************************************
 		// ** When DuDx... are copied back to host they r transposed **
@@ -641,12 +644,8 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	for i := range DuDxXp {
 		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDzXp[i]).RawMatrix().Data,
 			mat.DenseCopyOf(DuDz[i]).RawMatrix().Data, 1.e-8, "")
-	}
-	for i := range DuDxXp {
 		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDxXp[i]).RawMatrix().Data,
 			mat.DenseCopyOf(DuDx[i]).RawMatrix().Data, 1.e-8, "")
-	}
-	for i := range DuDxXp {
 		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDyXp[i]).RawMatrix().Data,
 			mat.DenseCopyOf(DuDy[i]).RawMatrix().Data, 1.e-8, "")
 	}
