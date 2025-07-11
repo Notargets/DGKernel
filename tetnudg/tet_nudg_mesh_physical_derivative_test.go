@@ -602,8 +602,8 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		// Multiple partitions means we need to check bounds
         for (int n = 0; n < NP; ++n; @inner) {
             for (int k = 0; k < KpartMax; ++k) {
-                int i = n + k*NP;  // Column-major indexing
                 if (k < K[part]) {  // Bounds check for partition size
+                	int i = n + k*NP;  // Column-major indexing
 					DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
 					DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
 					DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
