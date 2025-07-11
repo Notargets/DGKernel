@@ -496,6 +496,7 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	props := tn.GetProperties()
 
 	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	kp := runner.NewRunner(device, builder.Config{
@@ -599,11 +600,14 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		// *** This computation is happening in column-major format ***
         // ************************************************************
 		// Multiple partitions means we need to check bounds
-		for (int i = 0; i < NP*K[part]; ++i; @inner) {
-    		if (i < NP*K[part]) {
-				DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
-				DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
-				DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
+        for (int n = 0; n < NP; ++n; @inner) {
+            for (int k = 0; k < KpartMax; ++k) {
+                int i = n + k*NP;  // Column-major indexing
+                if (k < K[part]) {  // Bounds check for partition size
+					DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
+					DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
+					DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
+				}
 			}
 		}
         // ************************************************************
