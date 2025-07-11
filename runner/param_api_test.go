@@ -10,7 +10,7 @@ import (
 )
 
 func TestSimpleScalarKernel(t *testing.T) {
-	//device := utils.CreateTestDevice(true)
+	// device := utils.CreateTestDevice(true)
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -163,6 +163,7 @@ func TestParameterAPI_BasicUsage(t *testing.T) {
 // TestParameterAPI_MatrixSupport tests matrix parameter support
 func TestParameterAPI_MatrixSupport(t *testing.T) {
 	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	np := 4
@@ -234,6 +235,7 @@ func TestParameterAPI_MatrixSupport(t *testing.T) {
 // TestParameterAPI_TypeConversion tests type conversion during copy
 func TestParameterAPI_TypeConversion(t *testing.T) {
 	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
@@ -264,6 +266,7 @@ func TestParameterAPI_TypeConversion(t *testing.T) {
 // TestParameterAPI_InOut tests bidirectional data movement
 func TestParameterAPI_InOut(t *testing.T) {
 	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{

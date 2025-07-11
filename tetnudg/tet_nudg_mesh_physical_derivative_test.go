@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gonum.org/v1/gonum/mat"
 	"math"
+	"os"
 	"sort"
 	"testing"
 )
@@ -21,6 +22,7 @@ func TestTetNudgMatCopy(t *testing.T) {
 	props := tn.GetProperties()
 
 	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	k := []int{Ktot}
@@ -105,7 +107,8 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	totalNodes := Np * Ktot
 	props := tn.GetProperties()
 
-	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice()
+	device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	k := []int{Ktot}
@@ -203,6 +206,8 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 
 	// Dx is now in row-major format and can be compared directly to the host
 	// matrix result
+	fmt.Println(Dx)
+	os.Exit(1)
 	assert.InDeltaSlicef(t, DxH.RawMatrix().Data, Dx.RawMatrix().Data, 1.e-8, "")
 }
 
@@ -215,6 +220,7 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	props := tn.GetProperties()
 
 	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	k := []int{Ktot}

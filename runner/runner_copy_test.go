@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/DGKernel/utils"
+	"gonum.org/v1/gonum/mat"
 	"math"
 	"testing"
 )
@@ -13,7 +14,8 @@ import (
 // ============================================================================
 
 func TestRunner_CopySemantics(t *testing.T) {
-	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice()
+	device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{K: []int{10}})
@@ -99,6 +101,89 @@ func TestRunner_CopySemantics(t *testing.T) {
 		}
 	})
 
+	t.Run("Copy_Bidirectional_Matrix", func(t *testing.T) {
+		hostData := make([]float64, 10)
+		for i := range hostData {
+			hostData[i] = float64(i)
+		}
+		hostM := mat.NewDense(len(hostData), 1, hostData)
+
+		err := kp.DefineKernel("copy_test",
+			builder.InOut("data").Bind(hostM).Copy(), // Copies both ways
+		)
+		if err != nil {
+			t.Fatalf("Failed to define kernel: %v", err)
+		}
+
+		signature, _ := kp.GetKernelSignature("copy_test")
+		kernelSource := fmt.Sprintf(`
+@kernel void copy_test(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		real_t* data = data_PART(part);
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				data[i] = data[i] * 2.0;
+			}
+		}
+	}
+}`, signature)
+
+		kp.BuildKernel(kernelSource, "copy_test")
+		kp.RunKernel("copy_test")
+
+		// Host data should be automatically updated
+		for i, val := range hostM.RawMatrix().Data {
+			expected := float64(i) * 2.0
+			if math.Abs(val-expected) > 1e-10 {
+				t.Errorf("Copy back failed at %d: expected %f, got %f",
+					i, expected, val)
+			}
+		}
+	})
+
+	t.Run("CopyBack_Matrix", func(t *testing.T) {
+		hostData := make([]float64, 10)
+		for i := range hostData {
+			hostData[i] = float64(i)
+		}
+		hostM := mat.NewDense(len(hostData), 1, hostData)
+		returnM := mat.NewDense(len(hostData), 1, nil)
+
+		err := kp.DefineKernel("copy_test",
+			builder.Input("data").Bind(hostM).CopyTo(),
+			builder.Output("ret").Bind(returnM).CopyBack(),
+		)
+		if err != nil {
+			t.Fatalf("Failed to define kernel: %v", err)
+		}
+
+		signature, _ := kp.GetKernelSignature("copy_test")
+		kernelSource := fmt.Sprintf(`
+@kernel void copy_test(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		const real_t* data = data_PART(part);
+		real_t* ret = ret_PART(part);
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				ret[i] = data[i] * 2.0;
+			}
+		}
+	}
+}`, signature)
+
+		kp.BuildKernel(kernelSource, "copy_test")
+		kp.RunKernel("copy_test")
+
+		// Host data should be automatically updated
+		for i, val := range returnM.RawMatrix().Data {
+			expected := float64(i) * 2.0
+			if math.Abs(val-expected) > 1e-10 {
+				t.Errorf("Copy back failed at %d: expected %f, got %f",
+					i, expected, val)
+			}
+		}
+	})
+
 	t.Run("NoCopy", func(t *testing.T) {
 		hostData := make([]float64, 10)
 
@@ -151,6 +236,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 
 func TestRunner_PartitionCopy(t *testing.T) {
 	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	k := []int{3, 5, 7}
@@ -221,7 +307,8 @@ func TestRunner_PartitionCopy(t *testing.T) {
 }
 
 func TestRunner_TypeConversion(t *testing.T) {
-	device := utils.CreateTestDevice()
+	device := utils.CreateTestDevice(true)
+	// device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
