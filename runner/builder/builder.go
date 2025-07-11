@@ -119,7 +119,8 @@ func (kb *Builder) GetAllocatedArrays() []string {
 }
 
 // CalculateAlignedOffsetsAndSize computes partition offsets with alignment
-func (kb *Builder) CalculateAlignedOffsetsAndSize(spec ArraySpec) ([]int64, int64) {
+func (kb *Builder) CalculateAlignedOffsetsAndSize(spec ArraySpec) (
+	[]int64, int64) {
 	offsets := make([]int64, kb.NumPartitions+1)
 	totalElements := kb.GetTotalElements()
 	bytesPerElement := spec.Size / int64(totalElements)
@@ -164,6 +165,141 @@ func (kb *Builder) CalculateAlignedOffsetsAndSize(spec ArraySpec) ([]int64, int6
 		currentByteOffset = ((currentByteOffset + alignment - 1) / alignment) * alignment
 	}
 	offsets[kb.NumPartitions] = currentByteOffset / valueSize
+
+	// return offsets, currentByteOffset
+	return offsets, offsets[kb.NumPartitions] * valueSize
+}
+
+// CalculateAlignedOffsetsAndSize computes partition offsets with alignment
+// DEBUG VERSION - Add this to builder/builder.go temporarily
+func (kb *Builder) CalculateAlignedOffsetsAndSize_debug(spec ArraySpec) (
+	[]int64, int64) {
+	offsets := make([]int64, kb.NumPartitions+1)
+	totalElements := kb.GetTotalElements()
+	bytesPerElement := spec.Size / int64(totalElements)
+
+	// Determine the size of individual values
+	var valueSize int64
+	switch spec.DataType {
+	case Float32, INT32:
+		valueSize = 4
+	case Float64, INT64:
+		valueSize = 8
+	default:
+		// Default to 8 bytes if not specified
+		valueSize = 8
+	}
+
+	valuesPerElement := bytesPerElement / valueSize
+
+	alignment := int64(spec.Alignment)
+	if alignment == 0 {
+		alignment = int64(NoAlignment) // Default to no alignment (1)
+	}
+	currentByteOffset := int64(0)
+
+	// DEBUG: Print initial setup
+	fmt.Printf("\n=== CalculateAlignedOffsetsAndSize DEBUG ===\n")
+	fmt.Printf("Array: %s\n", spec.Name)
+	fmt.Printf("Total elements: %d\n", totalElements)
+	fmt.Printf("Spec.Size: %d bytes\n", spec.Size)
+	fmt.Printf("Bytes per element: %d\n", bytesPerElement)
+	fmt.Printf("Value size: %d bytes\n", valueSize)
+	fmt.Printf("Values per element: %d\n", valuesPerElement)
+	fmt.Printf("Alignment: %d bytes\n", alignment)
+	fmt.Printf("NumPartitions: %d\n", kb.NumPartitions)
+	fmt.Printf("K values: %v\n", kb.K)
+	fmt.Printf("\n")
+
+	for i := 0; i < kb.NumPartitions; i++ {
+		// DEBUG: Print state before alignment
+		fmt.Printf("Partition %d:\n", i)
+		fmt.Printf("  Current byte offset (before align): %d\n", currentByteOffset)
+
+		// Align current offset
+		oldByteOffset := currentByteOffset
+		if currentByteOffset%alignment != 0 {
+			currentByteOffset = ((currentByteOffset + alignment - 1) / alignment) * alignment
+		}
+
+		// DEBUG: Print alignment adjustment
+		if oldByteOffset != currentByteOffset {
+			fmt.Printf("  Alignment adjusted: %d -> %d (added %d bytes)\n",
+				oldByteOffset, currentByteOffset, currentByteOffset-oldByteOffset)
+		}
+
+		// Store offset in units of VALUES, not elements
+		// This makes pointer arithmetic work correctly: ptr + offset
+		offsets[i] = currentByteOffset / valueSize
+
+		// DEBUG: Print offset storage
+		fmt.Printf("  Stored offset[%d]: %d values (= %d bytes)\n",
+			i, offsets[i], offsets[i]*valueSize)
+
+		// Advance by partition data size
+		partitionValues := int64(kb.K[i]) * valuesPerElement
+		partitionBytes := partitionValues * valueSize
+
+		// DEBUG: Print partition size calculation
+		fmt.Printf("  Partition size: %d elements × %d values/elem = %d values\n",
+			kb.K[i], valuesPerElement, partitionValues)
+		fmt.Printf("  Partition bytes: %d values × %d bytes/value = %d bytes\n",
+			partitionValues, valueSize, partitionBytes)
+
+		currentByteOffset += partitionBytes
+
+		// DEBUG: Print new offset
+		fmt.Printf("  New byte offset (after data): %d\n", currentByteOffset)
+		fmt.Printf("\n")
+	}
+
+	// Final offset for bounds checking
+	fmt.Printf("Final alignment check:\n")
+	fmt.Printf("  Current byte offset: %d\n", currentByteOffset)
+
+	oldByteOffset := currentByteOffset
+	if currentByteOffset%alignment != 0 {
+		currentByteOffset = ((currentByteOffset + alignment - 1) / alignment) * alignment
+	}
+
+	if oldByteOffset != currentByteOffset {
+		fmt.Printf("  Final alignment: %d -> %d (added %d bytes)\n",
+			oldByteOffset, currentByteOffset, currentByteOffset-oldByteOffset)
+	}
+
+	offsets[kb.NumPartitions] = currentByteOffset / valueSize
+
+	// DEBUG: Print final results
+	fmt.Printf("\nFinal Results:\n")
+	fmt.Printf("  offsets array: %v (in values)\n", offsets)
+	fmt.Printf("  offsets in bytes: [")
+	for i, off := range offsets {
+		if i > 0 {
+			fmt.Printf(", ")
+		}
+		fmt.Printf("%d", off*valueSize)
+	}
+	fmt.Printf("]\n")
+	fmt.Printf("  Returned total size: %d bytes\n", currentByteOffset)
+	fmt.Printf("  Expected total based on final offset: %d bytes\n", offsets[kb.NumPartitions]*valueSize)
+
+	// DEBUG: Verify each partition can be accessed
+	fmt.Printf("\nVerification - Can each partition be accessed?\n")
+	for i := 0; i < kb.NumPartitions; i++ {
+		startByte := offsets[i] * valueSize
+		partitionValues := int64(kb.K[i]) * valuesPerElement
+		partitionBytes := partitionValues * valueSize
+		endByte := startByte + partitionBytes
+
+		fmt.Printf("  Partition %d: bytes [%d, %d), size %d",
+			i, startByte, endByte, partitionBytes)
+
+		if endByte > currentByteOffset {
+			fmt.Printf(" *** EXCEEDS ALLOCATION! ***")
+		}
+		fmt.Printf("\n")
+	}
+	fmt.Printf("=== END DEBUG ===\n\n")
 
 	return offsets, currentByteOffset
 }
