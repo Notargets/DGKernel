@@ -275,11 +275,12 @@ func (kr *Runner) generateSignatureFromParams(params []builder.ParamSpec) string
 	// Add scalars last
 	for _, p := range params {
 		if p.Direction == builder.DirectionScalar {
-			typeStr := "real_t"
+			typeStr := "double" // or "float" based on FloatType
 			if p.DataType == builder.INT32 || p.DataType == builder.INT64 {
-				typeStr = "int_t"
+				typeStr = "int" // or "long" based on IntType
 			}
-			parts = append(parts, fmt.Sprintf("const %s %s", typeStr, p.Name))
+			parts = append(parts, fmt.Sprintf("const %s %s", typeStr,
+				p.Name))
 		}
 	}
 

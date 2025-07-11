@@ -96,10 +96,8 @@ func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) erro
 	if err := kernel.RunWithArgs(args...); err != nil {
 		return fmt.Errorf("kernel execution failed: %w", err)
 	}
-	if kr.Device.Mode() == "CUDA" {
-		fmt.Println("Here...")
-		kr.Device.Finish() // or Sync()
-	}
+
+	kr.Device.Finish()
 
 	// Perform post-kernel data copies (device→host)
 	if err := kr.performPostKernelCopies(def); err != nil {
@@ -134,154 +132,7 @@ func (kr *Runner) performPostKernelCopies(def *KernelDefinition) error {
 }
 
 // buildKernelArguments constructs the argument list for kernel execution
-// WITH EXTENSIVE DEBUG LOGGING
-func (kr *Runner) buildKernelArguments(def *KernelDefinition, scalarValues []interface{}) ([]interface{}, error) {
-	var args []interface{}
-
-	fmt.Printf("\n=== DEBUG: buildKernelArguments for kernel '%s' ===\n", def.Name)
-	fmt.Printf("Number of parameters in definition: %d\n", len(def.Parameters))
-	fmt.Printf("Number of scalar values passed: %d\n", len(scalarValues))
-
-	// K array is always first
-	kMem := kr.PooledMemory["K"]
-	args = append(args, kMem)
-	fmt.Printf("Arg[0]: K array = %p (OCCAMemory)\n", kMem)
-
-	// Add device matrices in sorted order
-	deviceMatrixNames := make([]string, 0)
-	for i, p := range def.Parameters {
-		fmt.Printf("\nParameter[%d]: Name='%s', Direction=%v, IsMatrix=%v, IsStatic=%v\n",
-			i, p.Name, p.Direction, p.IsMatrix, p.IsStatic)
-		if p.IsMatrix && !p.IsStatic {
-			deviceMatrixNames = append(deviceMatrixNames, p.Name)
-		}
-	}
-	sortStrings(deviceMatrixNames)
-
-	fmt.Printf("\nDevice matrices (sorted): %v\n", deviceMatrixNames)
-
-	argIndex := 1
-	for _, name := range deviceMatrixNames {
-		if mem, exists := kr.PooledMemory[name]; exists {
-			args = append(args, mem)
-			fmt.Printf("Arg[%d]: Device matrix '%s' = %p\n", argIndex, name, mem)
-			argIndex++
-		} else {
-			return nil, fmt.Errorf("device matrix %s not found", name)
-		}
-	}
-
-	// Add arrays
-	fmt.Printf("\n--- Processing Arrays ---\n")
-	for _, p := range def.Parameters {
-		if p.Direction == builder.DirectionScalar || (p.IsMatrix && !p.IsStatic) {
-			fmt.Printf("Skipping parameter '%s' (scalar or already processed matrix)\n", p.Name)
-			continue
-		}
-
-		if !p.IsMatrix {
-			// Regular array
-			globalMem, hasGlobal := kr.PooledMemory[p.Name+"_global"]
-			offsetMem, hasOffset := kr.PooledMemory[p.Name+"_offsets"]
-
-			if !hasGlobal || !hasOffset {
-				return nil, fmt.Errorf("array %s not properly allocated", p.Name)
-			}
-
-			args = append(args, globalMem, offsetMem)
-			fmt.Printf("Arg[%d]: Array '%s_global' = %p\n", argIndex, p.Name, globalMem)
-			argIndex++
-			fmt.Printf("Arg[%d]: Array '%s_offsets' = %p\n", argIndex, p.Name, offsetMem)
-			argIndex++
-		}
-	}
-
-	// Add scalars - match them with parameter definitions
-	fmt.Printf("\n--- Processing Scalars ---\n")
-	scalarIndex := 0
-	for paramIdx, p := range def.Parameters {
-		if p.Direction == builder.DirectionScalar {
-			fmt.Printf("\nProcessing scalar parameter[%d] '%s':\n", paramIdx, p.Name)
-			fmt.Printf("  DataType: %v\n", p.DataType)
-			fmt.Printf("  HostBinding: %v (type: %T)\n", p.HostBinding, p.HostBinding)
-			fmt.Printf("  scalarIndex: %d, len(scalarValues): %d\n", scalarIndex, len(scalarValues))
-
-			var scalarValue interface{}
-
-			if scalarIndex >= len(scalarValues) {
-				// Try to get value from binding
-				if p.HostBinding != nil {
-					scalarValue = kr.getScalarValue(p.HostBinding)
-					fmt.Printf("  Using HostBinding value\n")
-					fmt.Printf("  Before getScalarValue: %v (type: %T)\n", p.HostBinding, p.HostBinding)
-					fmt.Printf("  After getScalarValue: %v (type: %T)\n", scalarValue, scalarValue)
-				} else {
-					return nil, fmt.Errorf("missing value for scalar %s", p.Name)
-				}
-			} else {
-				scalarValue = scalarValues[scalarIndex]
-				fmt.Printf("  Using passed scalar value[%d]: %v (type: %T)\n",
-					scalarIndex, scalarValue, scalarValue)
-				scalarIndex++
-			}
-
-			args = append(args, scalarValue)
-			fmt.Printf("Arg[%d]: Scalar '%s' = %v (type: %T)\n",
-				argIndex, p.Name, scalarValue, scalarValue)
-			argIndex++
-		}
-	}
-
-	fmt.Printf("\n=== Final argument list ===\n")
-	for i, arg := range args {
-		switch v := arg.(type) {
-		case *gocca.OCCAMemory:
-			fmt.Printf("Arg[%d]: OCCAMemory pointer = %p\n", i, v)
-		case float64:
-			fmt.Printf("Arg[%d]: float64 = %v\n", i, v)
-		case float32:
-			fmt.Printf("Arg[%d]: float32 = %v\n", i, v)
-		case int32:
-			fmt.Printf("Arg[%d]: int32 = %v\n", i, v)
-		case int64:
-			fmt.Printf("Arg[%d]: int64 = %v\n", i, v)
-		case int:
-			fmt.Printf("Arg[%d]: int = %v\n", i, v)
-		default:
-			fmt.Printf("Arg[%d]: %T = %v\n", i, arg, arg)
-		}
-	}
-	fmt.Printf("Total arguments: %d\n", len(args))
-	fmt.Printf("=== END DEBUG ===\n\n")
-
-	return args, nil
-}
-
-// Also add debug to getScalarValue
-func (kr *Runner) getScalarValue(binding interface{}) interface{} {
-	fmt.Printf("\n--- getScalarValue ---\n")
-	fmt.Printf("Input binding: %v (type: %T)\n", binding, binding)
-
-	v := reflect.ValueOf(binding)
-	fmt.Printf("reflect.ValueOf: %v, Kind: %v\n", v, v.Kind())
-
-	// Dereference pointers
-	if v.Kind() == reflect.Ptr {
-		fmt.Printf("Dereferencing pointer...\n")
-		v = v.Elem()
-		fmt.Printf("After deref: %v, Kind: %v\n", v, v.Kind())
-	}
-
-	// Return the actual value
-	result := v.Interface()
-	fmt.Printf("Final result: %v (type: %T)\n", result, result)
-	fmt.Printf("--- END getScalarValue ---\n")
-
-	return result
-}
-
-// buildKernelArguments constructs the argument list for kernel execution
-func (kr *Runner) buildKernelArguments_nodebug(def *KernelDefinition,
+func (kr *Runner) buildKernelArguments(def *KernelDefinition,
 	scalarValues []interface{}) ([]interface{}, error) {
 	var args []interface{}
 
@@ -346,7 +197,7 @@ func (kr *Runner) buildKernelArguments_nodebug(def *KernelDefinition,
 }
 
 // getScalarValue extracts the scalar value from a binding
-func (kr *Runner) getScalarValue_nodebug(binding interface{}) interface{} {
+func (kr *Runner) getScalarValue(binding interface{}) interface{} {
 	v := reflect.ValueOf(binding)
 
 	// Dereference pointers
