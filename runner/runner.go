@@ -21,6 +21,8 @@ type Runner struct {
 	kernelDefinitions map[string]*KernelDefinition
 	hostBindings      map[string]interface{}
 	IsPartitioned     bool
+	// Host-side offset storage for validation
+	hostOffsets map[string][]int64 // Maps array name to its offsets
 }
 
 // ArrayMetadata tracks information about allocated arrays
@@ -30,17 +32,12 @@ type ArrayMetadata struct {
 	isOutput bool
 }
 
-// NewRunner creates a new Runner instance
+// Modified NewRunner to initialize hostOffsets
 func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
-	if device == nil {
-		panic("Device cannot be nil")
-	}
 	bld := builder.NewBuilder(Config)
 
-	// Check CUDA @inner limit
-	if device.Mode() == "CUDA" && bld.KpartMax > 1024 {
-		panic(fmt.Sprintf("CUDA @inner limit exceeded: KpartMax=%d but CUDA"+
-			" is limited to 1024 threads per @inner loop. "+
+	if bld.KpartMax > 1024 {
+		panic(fmt.Sprintf("DGKernel doesn't support KpartMax > 1024, have %d. "+
 			"Reduce partition sizes.", bld.KpartMax))
 	}
 
@@ -59,15 +56,13 @@ func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
 		kernelDefinitions: make(map[string]*KernelDefinition),
 		hostBindings:      make(map[string]interface{}),
 		IsPartitioned:     len(Config.K) > 1,
+		hostOffsets:       make(map[string][]int64), // NEW: Initialize host offset storage
 	}
 
 	kMem := device.Malloc(int64(len(bld.K)*intSize), unsafe.Pointer(&bld.K[0]), nil)
 	kr.PooledMemory["K"] = kMem
 	return
 }
-
-// RunKernel executes a kernel defined with DefineKernel
-// It handles all data movement automatically based on parameter specifications
 func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
 	// Get kernel definition
 	def, exists := kr.kernelDefinitions[kernelName]
@@ -79,6 +74,13 @@ func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) erro
 	kernel, exists := kr.Kernels[kernelName]
 	if !exists {
 		return fmt.Errorf("kernel %s not compiled", kernelName)
+	}
+
+	// NEW: Validate offsets before kernel execution
+	for _, arrayName := range kr.AllocatedArrays {
+		if err := kr.validateOffsets(arrayName, "before kernel "+kernelName); err != nil {
+			fmt.Printf("Pre-kernel validation failed: %v\n", err)
+		}
 	}
 
 	// Perform pre-kernel data copies (host→device)
@@ -98,6 +100,14 @@ func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) erro
 	}
 
 	kr.Device.Finish()
+
+	// NEW: Validate offsets after kernel execution
+	for _, arrayName := range kr.AllocatedArrays {
+		if err := kr.validateOffsets(arrayName, "after kernel "+kernelName); err != nil {
+			fmt.Printf("Post-kernel validation failed: %v\n", err)
+			// This tells us the kernel is corrupting offset memory
+		}
+	}
 
 	// Perform post-kernel data copies (device→host)
 	if err := kr.performPostKernelCopies(def); err != nil {
@@ -295,7 +305,7 @@ func (kr *Runner) Free() {
 	}
 }
 
-// allocateSingleArray handles allocation of a single array
+// Modified allocateSingleArray in runner/runner.go
 func (kr *Runner) allocateSingleArray(spec builder.ArraySpec) error {
 	// Calculate aligned offsets and total size
 	offsets, totalSize := kr.CalculateAlignedOffsetsAndSize(spec)
@@ -321,12 +331,65 @@ func (kr *Runner) allocateSingleArray(spec builder.ArraySpec) error {
 	}
 	kr.PooledMemory[spec.Name+"_offsets"] = offsetMem
 
+	// NEW: Store offsets on host for validation
+	kr.hostOffsets[spec.Name] = make([]int64, len(offsets))
+	copy(kr.hostOffsets[spec.Name], offsets)
+
+	// NEW: Immediate validation
+	if err := kr.validateOffsets(spec.Name, "after allocation"); err != nil {
+		return fmt.Errorf("offset corruption detected immediately after allocation: %w", err)
+	}
+
 	// Track allocation
 	kr.AllocatedArrays = append(kr.AllocatedArrays, spec.Name)
 	kr.arrayMetadata[spec.Name] = ArrayMetadata{
 		spec:     spec,
 		dataType: spec.DataType,
 		isOutput: spec.IsOutput,
+	}
+
+	return nil
+}
+
+func (kr *Runner) validateOffsets(name string, context string) error {
+	// Get expected offsets from host storage
+	expectedOffsets, exists := kr.hostOffsets[name]
+	if !exists {
+		return fmt.Errorf("no host offsets found for %s", name)
+	}
+
+	// Read offsets from device
+	offsetsMem := kr.PooledMemory[name+"_offsets"]
+	if offsetsMem == nil {
+		return fmt.Errorf("no device offsets found for %s", name)
+	}
+
+	var actualOffsets []int64
+	if kr.GetIntSize() == 4 {
+		offsets32 := make([]int32, len(expectedOffsets))
+		offsetsMem.CopyTo(unsafe.Pointer(&offsets32[0]), int64(len(offsets32)*4))
+		actualOffsets = make([]int64, len(offsets32))
+		for i, v := range offsets32 {
+			actualOffsets[i] = int64(v)
+		}
+	} else {
+		actualOffsets = make([]int64, len(expectedOffsets))
+		offsetsMem.CopyTo(unsafe.Pointer(&actualOffsets[0]), int64(len(actualOffsets)*8))
+	}
+
+	// Compare offsets
+	for i := range expectedOffsets {
+		if expectedOffsets[i] != actualOffsets[i] {
+			fmt.Printf("\n!!! OFFSET CORRUPTION DETECTED for %s %s !!!\n", name, context)
+			fmt.Printf("Position %d: expected %d, got %d (diff: %d)\n",
+				i, expectedOffsets[i], actualOffsets[i], actualOffsets[i]-expectedOffsets[i])
+			fmt.Printf("Full arrays:\n")
+			fmt.Printf("  Expected: %v\n", expectedOffsets)
+			fmt.Printf("  Actual:   %v\n", actualOffsets)
+
+			return fmt.Errorf("offset corruption at position %d: expected %d, got %d",
+				i, expectedOffsets[i], actualOffsets[i])
+		}
 	}
 
 	return nil

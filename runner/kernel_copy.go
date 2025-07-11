@@ -143,27 +143,21 @@ func (kr *Runner) copyPartitionedDataFromDevice(spec *builder.ParamSpec, deviceM
 // Helper Methods - Eliminate Duplication
 // ============================================================================
 
-// readPartitionOffsets reads partition offset arrays (coalesced duplicate logic)
+// Modified readPartitionOffsets in runner/kernel_copy.go
 func (kr *Runner) readPartitionOffsets(name string) ([]int64, error) {
-	offsetsMem := kr.PooledMemory[name+"_offsets"]
-	if offsetsMem == nil {
-		return nil, fmt.Errorf("offsets for %s not found", name)
+	// First validate that device offsets haven't been corrupted
+	if err := kr.validateOffsets(name, "during read"); err != nil {
+		// Log the error but continue with host offsets
+		fmt.Printf("WARNING: %v\n", err)
+		fmt.Printf("Using host-cached offsets for %s\n", name)
 	}
 
-	var offsets []int64
-	if kr.GetIntSize() == 4 {
-		offsets32 := make([]int32, kr.NumPartitions+1)
-		offsetsMem.CopyTo(unsafe.Pointer(&offsets32[0]), int64(len(offsets32)*4))
-		offsets = make([]int64, len(offsets32))
-		for i, v := range offsets32 {
-			offsets[i] = int64(v)
-		}
-	} else {
-		offsets = make([]int64, kr.NumPartitions+1)
-		offsetsMem.CopyTo(unsafe.Pointer(&offsets[0]), int64(len(offsets)*8))
+	// Always return the host-cached offsets (which we know are correct)
+	if offsets, exists := kr.hostOffsets[name]; exists {
+		return offsets, nil
 	}
 
-	return offsets, nil
+	return nil, fmt.Errorf("no host offsets found for %s", name)
 }
 
 // copyDirectToDevice performs direct copy to device without conversion

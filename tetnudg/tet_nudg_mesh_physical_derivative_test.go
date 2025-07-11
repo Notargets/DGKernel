@@ -495,8 +495,8 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	fmt.Printf("Partition K: %v\n", k)
 	props := tn.GetProperties()
 
-	// device := utils.CreateTestDevice()
-	device := utils.CreateTestDevice(true)
+	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	kp := runner.NewRunner(device, builder.Config{
