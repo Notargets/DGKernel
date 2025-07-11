@@ -5,10 +5,10 @@ import (
 	"github.com/notargets/DGKernel/runner"
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/DGKernel/utils"
+	"github.com/notargets/gocca"
 	"github.com/stretchr/testify/assert"
 	"gonum.org/v1/gonum/mat"
 	"math"
-	"os"
 	"sort"
 	"testing"
 )
@@ -99,6 +99,99 @@ func TestTetNudgMatCopy(t *testing.T) {
 	}
 }
 
+func setupArrays(Np, Ktot int) [][]float64 {
+	U := make([]float64, Np*Ktot)
+	Rx := make([]float64, Np*Ktot)
+	Dx := make([]float64, Np*Ktot)
+	for i := 0; i < Ktot*Np; i++ {
+		U[i] = float64(i)
+		Rx[i] = float64(i)
+	}
+	return [][]float64{U, Rx, Dx}
+}
+
+func TestTetNudgArrayReturn(t *testing.T) {
+	Np := 10
+	Ktot := 565
+	for ii, name := range []string{"OpenMP", "CUDA"} {
+		fmt.Printf("Running %s test\n", name)
+		var device *gocca.OCCADevice
+		if ii%2 == 0 {
+			device = utils.CreateTestDevice()
+		} else {
+			device = utils.CreateTestDevice(true)
+		}
+		defer device.Free()
+
+		arrays := setupArrays(Np, Ktot)
+		U, Rx, Dx := arrays[0], arrays[1], arrays[2]
+
+		kp := runner.NewRunner(device, builder.Config{
+			K:         []int{Ktot},
+			FloatType: builder.Float64,
+		})
+		defer kp.Free()
+
+		// Add array parameters
+		params := make([]*builder.ParamBuilder, 0)
+		params = append(params,
+			// Since U and Rx are matrices, they will be transposed on CopyTo()
+			builder.Input("U").Bind(U).CopyTo(),
+			builder.Input("Rx").Bind(Rx).CopyTo(),
+			builder.Output("Dx").Bind(Dx).CopyBack(),
+		)
+
+		// Define kernel with all parameters
+		kernelName := "differentiate"
+		err := kp.DefineKernel(kernelName, params...)
+		if err != nil {
+			t.Fatalf("Failed to define kernel: %v", err)
+		}
+
+		// Get signature and build kernel
+		signature, _ := kp.GetKernelSignature(kernelName)
+		kernelSource := fmt.Sprintf(`
+#define NP %d
+
+@kernel void %s(%s) {
+    for (int part = 0; part < NPART; ++part; @outer) {
+        const real_t* U = U_PART(part);
+        real_t* Dx = Dx_PART(part);
+        const real_t* Rx = Rx_PART(part);
+        
+        // Use nested loops to avoid exceeding CUDA thread block limits
+        for (int n = 0; n < NP; ++n; @inner) {
+            for (int k = 0; k < KpartMax; ++k) {
+                int i = n + k*NP;  // Column-major indexing
+                if (k < K[part]) {  // Bounds check for partition size
+                    Dx[i] = Rx[i]*U[i];
+                }
+            }
+        }
+    }
+}
+`, Np, kernelName, signature)
+
+		_, err = kp.BuildKernel(kernelSource, kernelName)
+		if err != nil {
+			t.Fatalf("Failed to build kernel: %v", err)
+		}
+		// Execute differentiation
+		err = kp.RunKernel(kernelName)
+		if err != nil {
+			t.Fatalf("Kernel execution failed: %v", err)
+		}
+
+		// fmt.Println(Dx)
+		var sum float64
+		for i := 0; i < Np*Ktot; i++ {
+			sum += Dx[i] / float64(Np*Ktot)
+		}
+		sum /= float64(Np * Ktot)
+		fmt.Printf("Sum = %f\n", sum)
+	}
+}
+
 func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	order := 2
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
@@ -107,8 +200,8 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	totalNodes := Np * Ktot
 	props := tn.GetProperties()
 
-	// device := utils.CreateTestDevice()
-	device := utils.CreateTestDevice(true)
+	device := utils.CreateTestDevice()
+	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	k := []int{Ktot}
@@ -183,10 +276,13 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
         // ************************************************************
 		// *** This computation is happening in column-major format ***
         // ************************************************************
-		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
+        for (int n = 0; n < NP; ++n; @inner) {
+            for (int k = 0; k < KpartMax; ++k) {
+                int i = n + k*NP;  // Column-major indexing
+                if (k < K[part]) {  // Bounds check for partition size
 			// DxH.Set(j, K, tn.Rx.At(j, K)*Ur.At(j, K))
 			Dx[i] = Rx[i]*Ur[i];
-		}
+		} } }
         // ************************************************************
 		// *** When Dx is copied back to host, it will be transposed **
         // ************************************************************
@@ -206,8 +302,8 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 
 	// Dx is now in row-major format and can be compared directly to the host
 	// matrix result
-	fmt.Println(Dx)
-	os.Exit(1)
+	// fmt.Println(Dx)
+	// os.Exit(1)
 	assert.InDeltaSlicef(t, DxH.RawMatrix().Data, Dx.RawMatrix().Data, 1.e-8, "")
 }
 
