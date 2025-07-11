@@ -214,23 +214,22 @@ func TestCudaScalarDebug(t *testing.T) {
 	})
 
 	// Test 2: Scalar parameter with different kernel structure
-	if false {
-		t.Run("ScalarWithDebug", func(t *testing.T) {
-			hostOutput := make([]float64, 1)
-			hostDebug := make([]float64, 3) // For debug values
-			alpha := 2.5
+	t.Run("ScalarWithDebug", func(t *testing.T) {
+		hostOutput := make([]float64, 1)
+		hostDebug := make([]float64, 3) // For debug values
+		alpha := 2.5
 
-			err := kp.DefineKernel("scalardebug",
-				builder.Output("output").Bind(hostOutput).CopyBack(),
-				builder.Output("debug").Bind(hostDebug).CopyBack(),
-				builder.Scalar("alpha").Bind(alpha),
-			)
-			if err != nil {
-				t.Fatalf("Failed to define kernel: %v", err)
-			}
+		err := kp.DefineKernel("scalardebug",
+			builder.Output("output").Bind(hostOutput).CopyBack(),
+			builder.Output("debug").Bind(hostDebug).CopyBack(),
+			builder.Scalar("alpha").Bind(alpha),
+		)
+		if err != nil {
+			t.Fatalf("Failed to define kernel: %v", err)
+		}
 
-			signature, _ := kp.GetKernelSignature("scalardebug")
-			kernelSource := fmt.Sprintf(`
+		signature, _ := kp.GetKernelSignature("scalardebug")
+		kernelSource := fmt.Sprintf(`
 @kernel void scalardebug(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		real_t* output = output_PART(part);
@@ -251,27 +250,26 @@ func TestCudaScalarDebug(t *testing.T) {
 	}
 }`, signature)
 
-			_, err = kp.BuildKernel(kernelSource, "scalardebug")
-			if err != nil {
-				t.Fatalf("Failed to build kernel: %v", err)
-			}
+		_, err = kp.BuildKernel(kernelSource, "scalardebug")
+		if err != nil {
+			t.Fatalf("Failed to build kernel: %v", err)
+		}
 
-			err = kp.RunKernel("scalardebug")
-			if err != nil {
-				t.Fatalf("Kernel execution failed: %v", err)
-			}
+		err = kp.RunKernel("scalardebug")
+		if err != nil {
+			t.Fatalf("Kernel execution failed: %v", err)
+		}
 
-			t.Logf("Debug values:")
-			t.Logf("  Kernel executed: %f (should be 1.0)", hostDebug[0])
-			t.Logf("  Alpha received:  %f (should be 2.5)", hostDebug[1])
-			t.Logf("  K[part] value:   %f (should be 1.0)", hostDebug[2])
-			t.Logf("  Output value:    %f (should be 2.5)", hostOutput[0])
+		t.Logf("Debug values:")
+		t.Logf("  Kernel executed: %f (should be 1.0)", hostDebug[0])
+		t.Logf("  Alpha received:  %f (should be 2.5)", hostDebug[1])
+		t.Logf("  K[part] value:   %f (should be 1.0)", hostDebug[2])
+		t.Logf("  Output value:    %f (should be 2.5)", hostOutput[0])
 
-			if math.Abs(hostOutput[0]-alpha) > 1e-10 {
-				t.Errorf("Scalar parameter test failed: expected %f, got %f", alpha, hostOutput[0])
-			}
-		})
-	}
+		if math.Abs(hostOutput[0]-alpha) > 1e-10 {
+			t.Errorf("Scalar parameter test failed: expected %f, got %f", alpha, hostOutput[0])
+		}
+	})
 
 	// Test 3: Multiple scalars
 	t.Run("MultipleScalars", func(t *testing.T) {

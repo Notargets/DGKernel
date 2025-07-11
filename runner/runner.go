@@ -378,10 +378,7 @@ func (kr *Runner) allocateDeviceMatrix(name string, matrix mat.Matrix) error {
 
 // BuildKernel compiles and registers a kernel with the program
 func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
-	// Generate preamble if not already done
-	if kr.KernelPreamble == "" {
-		kr.GeneratePreamble()
-	}
+	kr.GeneratePreamble()
 
 	// Combine preamble with kernel source
 	fullSource := kr.KernelPreamble + "\n" + kernelSource
