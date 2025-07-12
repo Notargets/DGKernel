@@ -57,17 +57,15 @@ func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
 		}
 	}
 
-	// Get total size based on effective type
-	effectiveType := spec.DataType
-	if spec.ConvertType != 0 {
-		effectiveType = spec.ConvertType
-	}
+	// FIX: Use GetEffectiveType() to get what's actually on device
+	effectiveType := spec.GetEffectiveType()
 	totalSize := spec.Size * SizeOfType(effectiveType)
 
 	// Handle type conversion if needed
 	if spec.ConvertType != 0 && spec.ConvertType != spec.DataType {
 		// Perform conversion during copy back
-		return kr.copyFromDeviceWithTypeConversion(mem, hostBinding, spec.ConvertType, spec.DataType, totalSize)
+		// FIX: Pass effectiveType as source type (what's on device)
+		return kr.copyFromDeviceWithTypeConversion(mem, hostBinding, effectiveType, spec.DataType, totalSize)
 	}
 
 	// Direct copy from device
