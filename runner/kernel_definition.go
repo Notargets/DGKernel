@@ -103,7 +103,7 @@ func (kr *Runner) allocateTempArray(spec *builder.ParamSpec) error {
 	// Create array spec
 	arraySpec := builder.ArraySpec{
 		Name:      spec.Name,
-		Size:      spec.Size * sizeOfType(spec.DataType),
+		Size:      spec.Size * SizeOfType(spec.DataType),
 		DataType:  spec.DataType,
 		Alignment: spec.Alignment,
 		IsOutput:  true, // Temp arrays are writable
@@ -120,7 +120,7 @@ func (kr *Runner) allocateArrayFromSpec(spec *builder.ParamSpec) error {
 	// Create array spec
 	arraySpec := builder.ArraySpec{
 		Name:      spec.Name,
-		Size:      spec.Size * sizeOfType(effectiveType),
+		Size:      spec.Size * SizeOfType(effectiveType),
 		DataType:  effectiveType,
 		Alignment: spec.Alignment,
 		IsOutput:  !spec.IsConst(),
@@ -217,7 +217,7 @@ func (kr *Runner) verifyExistingAllocation(spec *builder.ParamSpec) error {
 	}
 
 	// Check size
-	expectedSize := spec.Size * sizeOfType(effectiveType)
+	expectedSize := spec.Size * SizeOfType(effectiveType)
 	if meta.spec.Size != expectedSize {
 		return fmt.Errorf("array %s size mismatch: allocated %d, requested %d",
 			spec.Name, meta.spec.Size, expectedSize)
@@ -248,7 +248,7 @@ func (kr *Runner) generateSignatureFromParams(params []builder.ParamSpec) string
 			deviceMatrixNames = append(deviceMatrixNames, p.Name)
 		}
 	}
-	sortStrings(deviceMatrixNames)
+	SortStrings(deviceMatrixNames)
 
 	for _, name := range deviceMatrixNames {
 		parts = append(parts, fmt.Sprintf("const real_t* %s", name))
@@ -275,37 +275,10 @@ func (kr *Runner) generateSignatureFromParams(params []builder.ParamSpec) string
 	// Add scalars last
 	for _, p := range params {
 		if p.Direction == builder.DirectionScalar {
-			typeStr := "double" // or "float" based on FloatType
-			if p.DataType == builder.INT32 || p.DataType == builder.INT64 {
-				typeStr = "int" // or "long" based on IntType
-			}
-			parts = append(parts, fmt.Sprintf("const %s %s", typeStr,
-				p.Name))
+			typeStr := GetScalarTypeName(p.DataType)
+			parts = append(parts, fmt.Sprintf("const %s %s", typeStr, p.Name))
 		}
 	}
 
 	return strings.Join(parts, ",\n\t")
-}
-
-// sizeOfType returns the size in bytes of a data type
-func sizeOfType(dt builder.DataType) int64 {
-	switch dt {
-	case builder.Float32, builder.INT32:
-		return 4
-	case builder.Float64, builder.INT64:
-		return 8
-	default:
-		return 8
-	}
-}
-
-// sortStrings sorts a slice of strings (simple bubble sort for small slices)
-func sortStrings(s []string) {
-	for i := 0; i < len(s); i++ {
-		for j := i + 1; j < len(s); j++ {
-			if s[i] > s[j] {
-				s[i], s[j] = s[j], s[i]
-			}
-		}
-	}
 }

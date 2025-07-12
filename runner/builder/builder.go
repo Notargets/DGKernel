@@ -170,140 +170,6 @@ func (kb *Builder) CalculateAlignedOffsetsAndSize(spec ArraySpec) (
 	return offsets, offsets[kb.NumPartitions] * valueSize
 }
 
-// CalculateAlignedOffsetsAndSize computes partition offsets with alignment
-// DEBUG VERSION - Add this to builder/builder.go temporarily
-func (kb *Builder) CalculateAlignedOffsetsAndSize_debug(spec ArraySpec) (
-	[]int64, int64) {
-	offsets := make([]int64, kb.NumPartitions+1)
-	totalElements := kb.GetTotalElements()
-	bytesPerElement := spec.Size / int64(totalElements)
-
-	// Determine the size of individual values
-	var valueSize int64
-	switch spec.DataType {
-	case Float32, INT32:
-		valueSize = 4
-	case Float64, INT64:
-		valueSize = 8
-	default:
-		// Default to 8 bytes if not specified
-		valueSize = 8
-	}
-
-	valuesPerElement := bytesPerElement / valueSize
-
-	alignment := int64(spec.Alignment)
-	if alignment == 0 {
-		alignment = int64(NoAlignment) // Default to no alignment (1)
-	}
-	currentByteOffset := int64(0)
-
-	// DEBUG: Print initial setup
-	fmt.Printf("\n=== CalculateAlignedOffsetsAndSize DEBUG ===\n")
-	fmt.Printf("Array: %s\n", spec.Name)
-	fmt.Printf("Total elements: %d\n", totalElements)
-	fmt.Printf("Spec.Size: %d bytes\n", spec.Size)
-	fmt.Printf("Bytes per element: %d\n", bytesPerElement)
-	fmt.Printf("Value size: %d bytes\n", valueSize)
-	fmt.Printf("Values per element: %d\n", valuesPerElement)
-	fmt.Printf("Alignment: %d bytes\n", alignment)
-	fmt.Printf("NumPartitions: %d\n", kb.NumPartitions)
-	fmt.Printf("K values: %v\n", kb.K)
-	fmt.Printf("\n")
-
-	for i := 0; i < kb.NumPartitions; i++ {
-		// DEBUG: Print state before alignment
-		fmt.Printf("Partition %d:\n", i)
-		fmt.Printf("  Current byte offset (before align): %d\n", currentByteOffset)
-
-		// Align current offset
-		oldByteOffset := currentByteOffset
-		if currentByteOffset%alignment != 0 {
-			currentByteOffset = ((currentByteOffset + alignment - 1) / alignment) * alignment
-		}
-
-		// DEBUG: Print alignment adjustment
-		if oldByteOffset != currentByteOffset {
-			fmt.Printf("  Alignment adjusted: %d -> %d (added %d bytes)\n",
-				oldByteOffset, currentByteOffset, currentByteOffset-oldByteOffset)
-		}
-
-		// Store offset in units of VALUES, not elements
-		// This makes pointer arithmetic work correctly: ptr + offset
-		offsets[i] = currentByteOffset / valueSize
-
-		// DEBUG: Print offset storage
-		fmt.Printf("  Stored offset[%d]: %d values (= %d bytes)\n",
-			i, offsets[i], offsets[i]*valueSize)
-
-		// Advance by partition data size
-		partitionValues := int64(kb.K[i]) * valuesPerElement
-		partitionBytes := partitionValues * valueSize
-
-		// DEBUG: Print partition size calculation
-		fmt.Printf("  Partition size: %d elements × %d values/elem = %d values\n",
-			kb.K[i], valuesPerElement, partitionValues)
-		fmt.Printf("  Partition bytes: %d values × %d bytes/value = %d bytes\n",
-			partitionValues, valueSize, partitionBytes)
-
-		currentByteOffset += partitionBytes
-
-		// DEBUG: Print new offset
-		fmt.Printf("  New byte offset (after data): %d\n", currentByteOffset)
-		fmt.Printf("\n")
-	}
-
-	// Final offset for bounds checking
-	fmt.Printf("Final alignment check:\n")
-	fmt.Printf("  Current byte offset: %d\n", currentByteOffset)
-
-	oldByteOffset := currentByteOffset
-	if currentByteOffset%alignment != 0 {
-		currentByteOffset = ((currentByteOffset + alignment - 1) / alignment) * alignment
-	}
-
-	if oldByteOffset != currentByteOffset {
-		fmt.Printf("  Final alignment: %d -> %d (added %d bytes)\n",
-			oldByteOffset, currentByteOffset, currentByteOffset-oldByteOffset)
-	}
-
-	offsets[kb.NumPartitions] = currentByteOffset / valueSize
-
-	// DEBUG: Print final results
-	fmt.Printf("\nFinal Results:\n")
-	fmt.Printf("  offsets array: %v (in values)\n", offsets)
-	fmt.Printf("  offsets in bytes: [")
-	for i, off := range offsets {
-		if i > 0 {
-			fmt.Printf(", ")
-		}
-		fmt.Printf("%d", off*valueSize)
-	}
-	fmt.Printf("]\n")
-	fmt.Printf("  Returned total size: %d bytes\n", currentByteOffset)
-	fmt.Printf("  Expected total based on final offset: %d bytes\n", offsets[kb.NumPartitions]*valueSize)
-
-	// DEBUG: Verify each partition can be accessed
-	fmt.Printf("\nVerification - Can each partition be accessed?\n")
-	for i := 0; i < kb.NumPartitions; i++ {
-		startByte := offsets[i] * valueSize
-		partitionValues := int64(kb.K[i]) * valuesPerElement
-		partitionBytes := partitionValues * valueSize
-		endByte := startByte + partitionBytes
-
-		fmt.Printf("  Partition %d: bytes [%d, %d), size %d",
-			i, startByte, endByte, partitionBytes)
-
-		if endByte > currentByteOffset {
-			fmt.Printf(" *** EXCEEDS ALLOCATION! ***")
-		}
-		fmt.Printf("\n")
-	}
-	fmt.Printf("=== END DEBUG ===\n\n")
-
-	return offsets, currentByteOffset
-}
-
 // GetTotalElements returns sum of all K values
 func (kb *Builder) GetTotalElements() int {
 	total := 0
@@ -337,7 +203,7 @@ func (kb *Builder) GeneratePreamble() string {
 func (kb *Builder) generateTypeDefinitions() string {
 	var sb strings.Builder
 
-	// Type definitions
+	// Type definitions - use the consolidated TypeName function concept
 	floatTypeStr := "double"
 	floatSuffix := ""
 	if kb.FloatType == Float32 {
@@ -400,21 +266,22 @@ func (kb *Builder) formatStaticMatrix(name string, m mat.Matrix) string {
 	//
 	// The matrix is declared with [cols][rows] to maintain column-major layout
 	// in C, where the first index varies fastest in memory.
-	sb.WriteString(fmt.Sprintf("// Matrix %s stored in column-major format\n", name))
-	sb.WriteString(fmt.Sprintf("const %s %s[%d][%d] = {\n", typeStr, name, cols, rows))
+	sb.WriteString(fmt.Sprintf("const %s %s[%d][%d] = {\n",
+		typeStr, name, cols, rows))
 
-	// Write columns (not rows) - this transposes the matrix
+	// Generate column-major data
+	// Outer loop over columns, inner loop over rows
 	for j := 0; j < cols; j++ {
-		sb.WriteString("    {")
+		sb.WriteString("  {")
 		for i := 0; i < rows; i++ {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			val := m.At(i, j) // Note: reading row i, col j but writing as column j
+			val := m.At(i, j) // Note: accessing in row,col but storing in col,row
 			if kb.FloatType == Float32 {
-				sb.WriteString(fmt.Sprintf("%.7ef", val))
+				sb.WriteString(fmt.Sprintf("%.8ff", val))
 			} else {
-				sb.WriteString(fmt.Sprintf("%.15e", val))
+				sb.WriteString(fmt.Sprintf("%.16e", val))
+			}
+			if i < rows-1 {
+				sb.WriteString(", ")
 			}
 		}
 		sb.WriteString("}")
@@ -423,42 +290,40 @@ func (kb *Builder) formatStaticMatrix(name string, m mat.Matrix) string {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("};\n\n")
+	sb.WriteString("};\n")
 
 	return sb.String()
 }
 
-// generatePartitionMacros creates macros for partition data access
+// generatePartitionMacros creates macros for accessing partitioned data
 func (kb *Builder) generatePartitionMacros() string {
 	var sb strings.Builder
 
 	sb.WriteString("// Partition access macros\n")
 
+	// Generate macro for each allocated array
 	for _, arrayName := range kb.AllocatedArrays {
 		sb.WriteString(fmt.Sprintf("#define %s_PART(part) (%s_global + %s_offsets[part])\n",
 			arrayName, arrayName, arrayName))
 	}
 
-	if len(kb.AllocatedArrays) > 0 {
-		sb.WriteString("\n")
-	}
-
+	sb.WriteString("\n")
 	return sb.String()
 }
 
-// generateMatrixMacros creates matrix multiplication macros with @inner loop (MODIFIED)
+// generateMatrixMacros generates MATMUL macros with @inner loops
 func (kb *Builder) generateMatrixMacros() string {
 	var sb strings.Builder
 
-	sb.WriteString("// Matrix multiplication macros\n")
-	sb.WriteString("// Automatically infer strides from matrix dimensions\n\n")
-
-	// Generate static matrix macros (existing logic)
+	// Generate macros for static matrices
 	for name, matrix := range kb.StaticMatrices {
-		sb.WriteString(kb.generateStaticMatrixMacro(name, matrix))
+		// Skip if also in DeviceMatrices (will be handled as device matrix)
+		if _, isDevice := kb.DeviceMatrices[name]; !isDevice {
+			sb.WriteString(kb.generateStaticMatrixMacro(name, matrix))
+		}
 	}
 
-	// Generate device matrix macros (NEW logic)
+	// Generate macros for device matrices
 	for name, matrix := range kb.DeviceMatrices {
 		sb.WriteString(kb.generateDeviceMatrixMacro(name, matrix))
 	}
@@ -466,16 +331,16 @@ func (kb *Builder) generateMatrixMacros() string {
 	return sb.String()
 }
 
-// generateStaticMatrixMacro generates macro for static matrix with column-major access
-func (kb *Builder) generateStaticMatrixMacro(name string, matrix mat.Matrix) string {
-	rows, cols := matrix.Dims()
+// generateStaticMatrixMacro creates a MATMUL macro for a static matrix
+func (kb *Builder) generateStaticMatrixMacro(name string, m mat.Matrix) string {
+	rows, cols := m.Dims()
 	var sb strings.Builder
 
-	// IMPORTANT: Matrix is stored in column-major format
-	// Access pattern: matrix[col][row] for column-major storage
-	sb.WriteString(fmt.Sprintf("// MATMUL macro for %s (column-major storage)\n", name))
+	// IMPORTANT: Static matrix is already in column-major format from formatStaticMatrix
+	sb.WriteString(fmt.Sprintf("// MATMUL macro for static matrix %s (column-major storage)\n", name))
 
-	// Standard multiply: OUT = Matrix × IN
+	// Matrix multiplication: OUT[i] = SUM_j(M[i,j] * IN[j])
+	// With column-major M: M[i,j] = M[j][i]
 	sb.WriteString(fmt.Sprintf("#define MATMUL_%s(IN, OUT, K_VAL) \\\n", name))
 	sb.WriteString("    do { \\\n")
 	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
@@ -483,7 +348,7 @@ func (kb *Builder) generateStaticMatrixMacro(name string, matrix mat.Matrix) str
 	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
 	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
 	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
-	// Column-major access: matrix[j][i] instead of matrix[i][j]
+	// Column-major access: [col][row] = [j][i]
 	sb.WriteString(fmt.Sprintf("                        sum += %s[j][i] * (IN)[elem * %d + j]; \\\n", name, cols))
 	sb.WriteString("                    } \\\n")
 	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] = sum; \\\n", rows))
@@ -492,7 +357,7 @@ func (kb *Builder) generateStaticMatrixMacro(name string, matrix mat.Matrix) str
 	sb.WriteString("        } \\\n")
 	sb.WriteString("    } while(0)\n\n")
 
-	// Accumulating multiply: OUT += Matrix × IN
+	// Generate MATMUL_ADD variant
 	sb.WriteString(fmt.Sprintf("#define MATMUL_ADD_%s(IN, OUT, K_VAL) \\\n", name))
 	sb.WriteString("    do { \\\n")
 	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
@@ -500,7 +365,6 @@ func (kb *Builder) generateStaticMatrixMacro(name string, matrix mat.Matrix) str
 	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
 	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
 	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
-	// Column-major access: matrix[j][i] instead of matrix[i][j]
 	sb.WriteString(fmt.Sprintf("                        sum += %s[j][i] * (IN)[elem * %d + j]; \\\n", name, cols))
 	sb.WriteString("                    } \\\n")
 	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] += sum; \\\n", rows))
@@ -512,9 +376,9 @@ func (kb *Builder) generateStaticMatrixMacro(name string, matrix mat.Matrix) str
 	return sb.String()
 }
 
-// generateDeviceMatrixMacro generates macro for device matrix with column-major access
-func (kb *Builder) generateDeviceMatrixMacro(name string, matrix mat.Matrix) string {
-	rows, cols := matrix.Dims()
+// generateDeviceMatrixMacro creates a MATMUL macro for a device matrix
+func (kb *Builder) generateDeviceMatrixMacro(name string, m mat.Matrix) string {
+	rows, cols := m.Dims()
 	var sb strings.Builder
 
 	// IMPORTANT: Device matrix pointer points to column-major data
@@ -538,6 +402,20 @@ func (kb *Builder) generateDeviceMatrixMacro(name string, matrix mat.Matrix) str
 	sb.WriteString("    } while(0)\n\n")
 
 	// Similar for MATMUL_ADD...
+	sb.WriteString(fmt.Sprintf("#define MATMUL_ADD_%s(IN, OUT, K_VAL) \\\n", name))
+	sb.WriteString("    do { \\\n")
+	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
+	sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
+	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
+	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
+	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
+	sb.WriteString(fmt.Sprintf("                        sum += %s[j * %d + i] * (IN)[elem * %d + j]; \\\n", name, rows, cols))
+	sb.WriteString("                    } \\\n")
+	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] += sum; \\\n", rows))
+	sb.WriteString("                } \\\n")
+	sb.WriteString("            } \\\n")
+	sb.WriteString("        } \\\n")
+	sb.WriteString("    } while(0)\n\n")
 
 	return sb.String()
 }

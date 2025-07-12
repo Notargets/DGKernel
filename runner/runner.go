@@ -5,40 +5,41 @@ import (
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
 	"gonum.org/v1/gonum/mat"
-	"reflect"
 	"unsafe"
 )
 
-type Runner struct {
-	*builder.Builder
-	arrayMetadata map[string]ArrayMetadata
-	// Runtime resources
-	Device       *gocca.OCCADevice
-	Kernels      map[string]*gocca.OCCAKernel
-	PooledMemory map[string]*gocca.OCCAMemory
-
-	// Parameter API fields
-	kernelDefinitions map[string]*KernelDefinition
-	hostBindings      map[string]interface{}
-	IsPartitioned     bool
-	// Host-side offset storage for validation
-	hostOffsets map[string][]int64 // Maps array name to its offsets
-}
-
-// ArrayMetadata tracks information about allocated arrays
+// ArrayMetadata stores information about allocated arrays
 type ArrayMetadata struct {
 	spec     builder.ArraySpec
 	dataType builder.DataType
 	isOutput bool
 }
 
-// Modified NewRunner to initialize hostOffsets
+// Runner orchestrates kernel compilation and execution with flexible parameter handling
+type Runner struct {
+	*builder.Builder
+	IsPartitioned     bool // NEW: Track if this runner uses partitioned data
+	Device            *gocca.OCCADevice
+	Kernels           map[string]*gocca.OCCAKernel
+	PooledMemory      map[string]*gocca.OCCAMemory
+	arrayMetadata     map[string]ArrayMetadata
+	kernelDefinitions map[string]*KernelDefinition
+	hostBindings      map[string]interface{} // Store host data bindings
+	hostOffsets       map[string][]int64     // NEW: Store host-side copy of offsets
+}
+
+// NewRunner creates a new Runner instance
 func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
 	bld := builder.NewBuilder(Config)
 
-	if bld.KpartMax > 1024 {
-		panic(fmt.Sprintf("DGKernel doesn't support KpartMax > 1024, have %d. "+
-			"Reduce partition sizes.", bld.KpartMax))
+	// Note: Removed GetMemoryAllocated check as it doesn't exist in gocca API
+	// Users should ensure clean device state before creating a new runner
+
+	if bld.KpartMax > 1048576 { // 2^20 elements
+		panic(fmt.Sprintf("KpartMax exceeds 2^20 (1048576), usually caused by unbalanced workloads.\n"+
+			"Found KpartMax=%d. Please balance K values or increase partition count.\n"+
+			"Current K values: %v\n"+
+			"Reduce partition sizes.", bld.KpartMax, bld.K))
 	}
 
 	// Allocate K array on Device
@@ -63,6 +64,7 @@ func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
 	kr.PooledMemory["K"] = kMem
 	return
 }
+
 func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
 	// Get kernel definition
 	def, exists := kr.kernelDefinitions[kernelName]
@@ -156,7 +158,7 @@ func (kr *Runner) buildKernelArguments(def *KernelDefinition,
 			deviceMatrixNames = append(deviceMatrixNames, p.Name)
 		}
 	}
-	sortStrings(deviceMatrixNames)
+	SortStrings(deviceMatrixNames)
 
 	for _, name := range deviceMatrixNames {
 		if mem, exists := kr.PooledMemory[name]; exists {
@@ -168,37 +170,39 @@ func (kr *Runner) buildKernelArguments(def *KernelDefinition,
 
 	// Add arrays
 	for _, p := range def.Parameters {
-		if p.Direction == builder.DirectionScalar || (p.IsMatrix && !p.IsStatic) {
-			continue
+		if p.Direction == builder.DirectionScalar || p.IsMatrix {
+			continue // Skip scalars and matrices
 		}
 
-		if !p.IsMatrix {
-			// Regular array
-			globalMem, hasGlobal := kr.PooledMemory[p.Name+"_global"]
-			offsetMem, hasOffset := kr.PooledMemory[p.Name+"_offsets"]
-
-			if !hasGlobal || !hasOffset {
-				return nil, fmt.Errorf("array %s not properly allocated", p.Name)
-			}
-
-			args = append(args, globalMem, offsetMem)
+		// Add global data pointer
+		globalMem, exists := kr.PooledMemory[p.Name+"_global"]
+		if !exists {
+			return nil, fmt.Errorf("memory for %s not found", p.Name)
 		}
+		args = append(args, globalMem)
+
+		// Add offset array
+		offsetMem, exists := kr.PooledMemory[p.Name+"_offsets"]
+		if !exists {
+			return nil, fmt.Errorf("offsets for %s not found", p.Name)
+		}
+		args = append(args, offsetMem)
 	}
 
-	// Add scalars - match them with parameter definitions
-	scalarIndex := 0
+	// Add scalars last
+	scalarIdx := 0
 	for _, p := range def.Parameters {
 		if p.Direction == builder.DirectionScalar {
-			if scalarIndex >= len(scalarValues) {
-				// Try to get value from binding
+			if scalarIdx >= len(scalarValues) {
+				// Use bound value if available
 				if p.HostBinding != nil {
-					args = append(args, kr.getScalarValue(p.HostBinding))
+					args = append(args, p.HostBinding)
 				} else {
-					return nil, fmt.Errorf("missing value for scalar %s", p.Name)
+					return nil, fmt.Errorf("no value provided for scalar %s", p.Name)
 				}
 			} else {
-				args = append(args, scalarValues[scalarIndex])
-				scalarIndex++
+				args = append(args, scalarValues[scalarIdx])
+				scalarIdx++
 			}
 		}
 	}
@@ -206,41 +210,84 @@ func (kr *Runner) buildKernelArguments(def *KernelDefinition,
 	return args, nil
 }
 
-// getScalarValue extracts the scalar value from a binding
-func (kr *Runner) getScalarValue(binding interface{}) interface{} {
-	v := reflect.ValueOf(binding)
-
-	// Dereference pointers
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-
-	// Return the actual value
-	return v.Interface()
-}
-
-// GetKernelSignature returns the generated signature for a defined kernel
+// GetKernelSignature returns the signature for a defined kernel
 func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
 	def, exists := kr.kernelDefinitions[kernelName]
-	if !exists {
-		return "", fmt.Errorf("kernel %s not defined", kernelName)
+	if exists {
+		return def.Signature, nil
 	}
-	return def.Signature, nil
+
+	// Fall back to old method for backward compatibility
+	return kr.GenerateKernelSignature(), nil
 }
 
-// GetMemory returns the device memory handle for an array
+// AddStaticMatrix adds a matrix that will be embedded as static const in kernels
+func (kr *Runner) AddStaticMatrix(name string, m mat.Matrix) {
+	kr.Builder.AddStaticMatrix(name, m)
+}
+
+// AddDeviceMatrix adds a matrix that will be allocated in device global memory
+func (kr *Runner) AddDeviceMatrix(name string, m mat.Matrix) {
+	kr.Builder.AddDeviceMatrix(name, m)
+}
+
+// AllocateDeviceMatrices allocates all device matrices that were added
+func (kr *Runner) AllocateDeviceMatrices() error {
+	// Allocate each device matrix
+	for name, matrix := range kr.DeviceMatrices {
+		if _, exists := kr.PooledMemory[name]; exists {
+			continue // Already allocated
+		}
+
+		rows, cols := matrix.Dims()
+		totalElements := rows * cols
+
+		var mem *gocca.OCCAMemory
+		if kr.FloatType == builder.Float64 {
+			// Copy and transpose for column-major storage
+			transposed := make([]float64, totalElements)
+			for i := 0; i < rows; i++ {
+				for j := 0; j < cols; j++ {
+					transposed[j*rows+i] = matrix.At(i, j)
+				}
+			}
+			mem = kr.Device.Malloc(int64(totalElements*8), unsafe.Pointer(&transposed[0]), nil)
+		} else {
+			// Convert to float32 and transpose
+			transposed := make([]float32, totalElements)
+			for i := 0; i < rows; i++ {
+				for j := 0; j < cols; j++ {
+					transposed[j*rows+i] = float32(matrix.At(i, j))
+				}
+			}
+			mem = kr.Device.Malloc(int64(totalElements*4), unsafe.Pointer(&transposed[0]), nil)
+		}
+
+		kr.PooledMemory[name] = mem
+	}
+
+	return nil
+}
+
+// GetAllocatedArrays returns a sorted list of allocated array names
+func (kr *Runner) GetAllocatedArrays() []string {
+	arrays := make([]string, 0, len(kr.arrayMetadata))
+	for name := range kr.arrayMetadata {
+		arrays = append(arrays, name)
+	}
+	SortStrings(arrays)
+	return arrays
+}
+
+// GetMemory returns the device memory for a named array
 func (kr *Runner) GetMemory(arrayName string) *gocca.OCCAMemory {
 	if mem, exists := kr.PooledMemory[arrayName+"_global"]; exists {
-		return mem
-	}
-	// Also check for non-array allocations (like device matrices)
-	if mem, exists := kr.PooledMemory[arrayName]; exists {
 		return mem
 	}
 	return nil
 }
 
-// GetOffsets returns the offset memory handle for an array
+// GetOffsets returns the offset memory for a named array
 func (kr *Runner) GetOffsets(arrayName string) *gocca.OCCAMemory {
 	if mem, exists := kr.PooledMemory[arrayName+"_offsets"]; exists {
 		return mem
@@ -271,16 +318,7 @@ func (kr *Runner) GetArrayLogicalSize(name string) (int, error) {
 	}
 
 	// Return the total size divided by the size of the data type
-	var elementSize int64
-	switch metadata.dataType {
-	case builder.Float32, builder.INT32:
-		elementSize = 4
-	case builder.Float64, builder.INT64:
-		elementSize = 8
-	default:
-		return 0, fmt.Errorf("unknown data type")
-	}
-
+	elementSize := SizeOfType(metadata.dataType)
 	return int(metadata.spec.Size / elementSize), nil
 }
 
@@ -290,6 +328,40 @@ func (kr *Runner) GetIntSize() int {
 		return 4
 	}
 	return 8
+}
+
+// BuildKernel compiles and registers a kernel with the program
+func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
+	kr.GeneratePreamble()
+
+	// Combine preamble with kernel source
+	fullSource := kr.KernelPreamble + "\n" + kernelSource
+
+	// Build kernel with OpenMP optimization fix
+	var kernel *gocca.OCCAKernel
+	var err error
+
+	if kr.Device.Mode() == "OpenMP" {
+		// Workaround for OCCA bug: OpenMP doesn't get default -O3 flag
+		props := gocca.JsonParse(`{"compiler_flags": "-O3"}`)
+		defer props.Free()
+		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, props)
+	} else {
+		// Other devices work correctly with default flags
+		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, nil)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to build kernel %s: %w", kernelName, err)
+	}
+
+	// Register kernel
+	if kernel != nil {
+		kr.Kernels[kernelName] = kernel
+		return kernel, nil
+	}
+
+	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
 }
 
 // Free releases all resources
@@ -381,245 +453,13 @@ func (kr *Runner) validateOffsets(name string, context string) error {
 	for i := range expectedOffsets {
 		if expectedOffsets[i] != actualOffsets[i] {
 			fmt.Printf("\n!!! OFFSET CORRUPTION DETECTED for %s %s !!!\n", name, context)
-			fmt.Printf("Position %d: expected %d, got %d (diff: %d)\n",
-				i, expectedOffsets[i], actualOffsets[i], actualOffsets[i]-expectedOffsets[i])
-			fmt.Printf("Full arrays:\n")
-			fmt.Printf("  Expected: %v\n", expectedOffsets)
-			fmt.Printf("  Actual:   %v\n", actualOffsets)
-
-			return fmt.Errorf("offset corruption at position %d: expected %d, got %d",
+			fmt.Printf("Offset[%d]: expected %d, got %d\n", i, expectedOffsets[i], actualOffsets[i])
+			fmt.Printf("Expected offsets: %v\n", expectedOffsets)
+			fmt.Printf("Actual offsets: %v\n", actualOffsets)
+			return fmt.Errorf("offset[%d] corrupted: expected %d, got %d",
 				i, expectedOffsets[i], actualOffsets[i])
 		}
 	}
 
 	return nil
-}
-
-// AllocateDeviceMatrices allocates device memory for all device matrices
-func (kr *Runner) AllocateDeviceMatrices() error {
-	for name, matrix := range kr.Builder.DeviceMatrices {
-		err := kr.allocateDeviceMatrix(name, matrix)
-		if err != nil {
-			return fmt.Errorf("failed to allocate device matrix %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// allocateDeviceMatrix handles allocation of a single device matrix
-func (kr *Runner) allocateDeviceMatrix(name string, matrix mat.Matrix) error {
-	rows, cols := matrix.Dims()
-
-	// Convert matrix to column-major flat array
-	data := make([]float64, rows*cols)
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			// Transpose during copy: write to column-major position
-			data[j*rows+i] = matrix.At(i, j)
-		}
-	}
-
-	// Handle float32 conversion if needed
-	var mem *gocca.OCCAMemory
-	if kr.FloatType == builder.Float32 {
-		data32 := make([]float32, len(data))
-		for i, v := range data {
-			data32[i] = float32(v)
-		}
-		size := int64(len(data32) * 4) // 4 bytes per float32
-		mem = kr.Device.Malloc(size, unsafe.Pointer(&data32[0]), nil)
-	} else {
-		size := int64(len(data) * 8) // 8 bytes per float64
-		mem = kr.Device.Malloc(size, unsafe.Pointer(&data[0]), nil)
-	}
-
-	// Store in pooled memory for automatic cleanup
-	kr.PooledMemory[name] = mem
-
-	return nil
-}
-
-// BuildKernel compiles and registers a kernel with the program
-func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
-	kr.GeneratePreamble()
-
-	// Combine preamble with kernel source
-	fullSource := kr.KernelPreamble + "\n" + kernelSource
-
-	// Build kernel with OpenMP optimization fix
-	var kernel *gocca.OCCAKernel
-	var err error
-
-	if kr.Device.Mode() == "OpenMP" {
-		// Workaround for OCCA bug: OpenMP doesn't get default -O3 flag
-		props := gocca.JsonParse(`{"compiler_flags": "-O3"}`)
-		defer props.Free()
-		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, props)
-	} else {
-		// Other devices work correctly with default flags
-		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, nil)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to build kernel %s: %w", kernelName, err)
-	}
-
-	// Register kernel
-	if kernel != nil {
-		kr.Kernels[kernelName] = kernel
-		return kernel, nil
-	}
-
-	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
-}
-
-// CopyArrayToHost copies array data from device to host, removing alignment padding
-func CopyArrayToHost[T any](kr *Runner, name string) ([]T, error) {
-	// Check if array exists
-	metadata, exists := kr.arrayMetadata[name]
-	if !exists {
-		return nil, fmt.Errorf("array %s not found", name)
-	}
-
-	// Verify type matches
-	var sample T
-	requestedType := getDataTypeFromSample(sample)
-	if requestedType != metadata.dataType {
-		return nil, fmt.Errorf("type mismatch: array is %v, requested %v",
-			metadata.dataType, requestedType)
-	}
-
-	// Get memory and offsets
-	memory := kr.GetMemory(name)
-	if memory == nil {
-		return nil, fmt.Errorf("memory for %s not found", name)
-	}
-
-	offsetsMem := kr.PooledMemory[name+"_offsets"]
-	if offsetsMem == nil {
-		return nil, fmt.Errorf("offsets for %s not found", name)
-	}
-
-	// Read offsets to determine actual data locations
-	numOffsets := kr.NumPartitions + 1
-	var offsets []int64
-
-	if kr.GetIntSize() == 4 {
-		offsets32 := make([]int32, numOffsets)
-		offsetsMem.CopyTo(unsafe.Pointer(&offsets32[0]), int64(numOffsets*4))
-		offsets = make([]int64, numOffsets)
-		for i, v := range offsets32 {
-			offsets[i] = int64(v)
-		}
-	} else {
-		offsets = make([]int64, numOffsets)
-		offsetsMem.CopyTo(unsafe.Pointer(&offsets[0]), int64(numOffsets*8))
-	}
-
-	// Calculate total elements (sum of K values)
-	totalElements := kr.GetTotalElements()
-	result := make([]T, totalElements)
-
-	// Get element size
-	elementSize := int64(unsafe.Sizeof(sample))
-
-	// Copy each partition contiguously
-	destIndex := 0
-	for i := 0; i < kr.NumPartitions; i++ {
-		partitionElements := kr.K[i]
-		partitionBytes := int64(partitionElements) * elementSize
-		sourceOffset := offsets[i] * elementSize
-
-		// Copy this partition's data
-		memory.CopyToWithOffset(
-			unsafe.Pointer(&result[destIndex]),
-			partitionBytes,
-			sourceOffset,
-		)
-
-		destIndex += partitionElements
-	}
-
-	return result, nil
-}
-
-// CopyPartitionToHost copies a specific partition's data from device to host
-func CopyPartitionToHost[T any](kr *Runner, name string, partitionID int) ([]T, error) {
-	if partitionID < 0 || partitionID >= kr.NumPartitions {
-		return nil, fmt.Errorf("invalid partition ID: %d", partitionID)
-	}
-
-	// Check if array exists
-	metadata, exists := kr.arrayMetadata[name]
-	if !exists {
-		return nil, fmt.Errorf("array %s not found", name)
-	}
-
-	// Verify type matches
-	var sample T
-	requestedType := getDataTypeFromSample(sample)
-	if requestedType != metadata.dataType {
-		return nil, fmt.Errorf("type mismatch: array is %v, requested %v",
-			metadata.dataType, requestedType)
-	}
-
-	// Get memory and offsets
-	memory := kr.GetMemory(name)
-	if memory == nil {
-		return nil, fmt.Errorf("memory for %s not found", name)
-	}
-
-	offsetsMem := kr.PooledMemory[name+"_offsets"]
-	if offsetsMem == nil {
-		return nil, fmt.Errorf("offsets for %s not found", name)
-	}
-
-	// Read just the offsets we need
-	var partitionOffset int64
-	if kr.GetIntSize() == 4 {
-		offsets32 := make([]int32, 2)
-		offsetsBytes := int64(8) // 2 * 4 bytes
-		sourceOffset := int64(partitionID * 4)
-		offsetsMem.CopyToWithOffset(unsafe.Pointer(&offsets32[0]), offsetsBytes, sourceOffset)
-		partitionOffset = int64(offsets32[0])
-	} else {
-		offsets := make([]int64, 2)
-		offsetsBytes := int64(16) // 2 * 8 bytes
-		sourceOffset := int64(partitionID * 8)
-		offsetsMem.CopyToWithOffset(unsafe.Pointer(&offsets[0]), offsetsBytes, sourceOffset)
-		partitionOffset = offsets[0]
-	}
-
-	// Create result array for this partition
-	partitionElements := kr.K[partitionID]
-	result := make([]T, partitionElements)
-
-	// Copy partition data
-	elementSize := int64(unsafe.Sizeof(sample))
-	partitionBytes := int64(partitionElements) * elementSize
-	sourceOffset := partitionOffset * elementSize
-
-	memory.CopyToWithOffset(
-		unsafe.Pointer(&result[0]),
-		partitionBytes,
-		sourceOffset,
-	)
-
-	return result, nil
-}
-
-// Helper function to get DataType from sample
-func getDataTypeFromSample(sample interface{}) builder.DataType {
-	switch sample.(type) {
-	case float32:
-		return builder.Float32
-	case float64:
-		return builder.Float64
-	case int32:
-		return builder.INT32
-	case int64:
-		return builder.INT64
-	default:
-		return 0
-	}
 }
