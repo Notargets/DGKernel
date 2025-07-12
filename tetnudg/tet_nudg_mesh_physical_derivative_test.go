@@ -454,6 +454,131 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	fmt.Println("Device calculation of physical derivative validates")
 }
 
+func CalculatePhysicalDerivative(t *testing.T, device *gocca.OCCADevice,
+	splits []int, tn *TetNudgMesh,
+	U, Rx, Ry, Rz, Sx, Sy, Sz, Tx, Ty, Tz []mat.Matrix) (
+	DuDx, DuDy, DuDz []mat.Matrix) {
+
+	var (
+		Np, K, Ktot, totalNodes int
+	)
+	for _, m := range U {
+		Np, K = m.Dims()
+		totalNodes += Np * K
+		Ktot += K
+	}
+
+	kp := runner.NewRunner(device, builder.Config{
+		K:         splits,
+		FloatType: builder.Float64,
+	})
+	defer kp.Free()
+
+	// Collect all matrices into param builders
+	props := tn.GetProperties()
+	matrices := tn.GetRefMatrices()
+	params := make([]*builder.ParamBuilder, 0, len(matrices)+2)
+
+	// Add matrices as parameters
+	for name, mat := range matrices {
+		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
+	}
+
+	DuDx = splitMatrix(splits, mat.NewDense(Np, Ktot, nil))
+	DuDy = splitMatrix(splits, mat.NewDense(Np, Ktot, nil))
+	DuDz = splitMatrix(splits, mat.NewDense(Np, Ktot, nil))
+
+	// Add array parameters
+	params = append(params,
+		builder.Input("U").Bind(U).CopyTo(),
+		builder.Input("Rx").Bind(Rx).CopyTo(),
+		builder.Input("Sx").Bind(Sx).CopyTo(),
+		builder.Input("Tx").Bind(Tx).CopyTo(),
+		builder.Input("Ry").Bind(Ry).CopyTo(),
+		builder.Input("Sy").Bind(Sy).CopyTo(),
+		builder.Input("Ty").Bind(Ty).CopyTo(),
+		builder.Input("Rz").Bind(Rz).CopyTo(),
+		builder.Input("Sz").Bind(Sz).CopyTo(),
+		builder.Input("Tz").Bind(Tz).CopyTo(),
+		builder.Output("DuDx").Bind(DuDx).CopyBack(),
+		builder.Output("DuDy").Bind(DuDy).CopyBack(),
+		builder.Output("DuDz").Bind(DuDz).CopyBack(),
+		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
+		builder.Temp("Us").Type(builder.Float64).Size(totalNodes),
+		builder.Temp("Ut").Type(builder.Float64).Size(totalNodes),
+	)
+
+	// Define kernel with all parameters
+	kernelName := "differentiate"
+	err := kp.DefineKernel(kernelName, params...)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
+	}
+
+	// Get signature and build kernel
+	signature, _ := kp.GetKernelSignature(kernelName)
+	kernelSource := fmt.Sprintf(`
+#define NP %d
+
+@kernel void %s(%s) {
+    for (int part = 0; part < NPART; ++part; @outer) {
+        const real_t* U = U_PART(part);
+        real_t* Ur = Ur_PART(part);
+        real_t* Us = Us_PART(part);
+        real_t* Ut = Ut_PART(part);
+        MATMUL_Dr_%s(U, Ur, K[part]);
+        MATMUL_Ds_%s(U, Us, K[part]);
+        MATMUL_Dt_%s(U, Ut, K[part]);
+
+        real_t* DuDx = DuDx_PART(part);
+        real_t* DuDy = DuDy_PART(part);
+        real_t* DuDz = DuDz_PART(part);
+        const real_t* Rx = Rx_PART(part);
+        const real_t* Sx = Sx_PART(part);
+        const real_t* Tx = Tx_PART(part);
+        const real_t* Ry = Ry_PART(part);
+        const real_t* Sy = Sy_PART(part);
+        const real_t* Ty = Ty_PART(part);
+        const real_t* Rz = Rz_PART(part);
+        const real_t* Sz = Sz_PART(part);
+        const real_t* Tz = Tz_PART(part);
+        // ************************************************************
+		// *** This computation is happening in column-major format ***
+        // ************************************************************
+		// Multiple partitions means we need to check bounds
+        // for (int n = 0; n < NP; ++n; @inner) {
+        for (int k = 0; k < KpartMax; ++k; @inner) {
+            	if (k < K[part]) {  // Bounds check for partition size
+        		for (int n = 0; n < NP; ++n) {
+        	// for (int k = 0; k < KpartMax; ++k) {
+            // 	if (k < K[part]) {  // Bounds check for partition size
+                	int i = n + k*NP;  // Column-major indexing
+					DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
+					DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
+					DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
+				}
+			}
+		}
+        // ************************************************************
+		// ** When DuDx... are copied back to host they r transposed **
+        // ************************************************************
+    }
+}
+`, tn.Np, kernelName, signature,
+		props.ShortName, props.ShortName, props.ShortName)
+
+	_, err = kp.BuildKernel(kernelSource, kernelName)
+	if err != nil {
+		t.Fatalf("Failed to build kernel: %v", err)
+	}
+	// Execute differentiation
+	err = kp.RunKernel(kernelName)
+	if err != nil {
+		t.Fatalf("Kernel execution failed: %v", err)
+	}
+	return
+}
+
 func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	order := 4
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
@@ -600,9 +725,12 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		// *** This computation is happening in column-major format ***
         // ************************************************************
 		// Multiple partitions means we need to check bounds
+        // for (int n = 0; n < NP; ++n; @inner) {
         for (int k = 0; k < KpartMax; ++k; @inner) {
-            if (k < K[part]) {  // Bounds check for partition size
+            	if (k < K[part]) {  // Bounds check for partition size
         		for (int n = 0; n < NP; ++n) {
+        	// for (int k = 0; k < KpartMax; ++k) {
+            // 	if (k < K[part]) {  // Bounds check for partition size
                 	int i = n + k*NP;  // Column-major indexing
 					DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
 					DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
