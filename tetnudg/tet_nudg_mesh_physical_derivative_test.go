@@ -458,7 +458,7 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 func CalculatePhysicalDerivative(t *testing.T, device *gocca.OCCADevice,
 	splits []int, tn *TetNudgMesh,
 	U, Rx, Ry, Rz, Sx, Sy, Sz, Tx, Ty, Tz []mat.Matrix) (
-	DuDx, DuDy, DuDz []mat.Matrix) {
+	DuDx, DuDy, DuDz []mat.Matrix, elapsed time.Duration) {
 
 	var (
 		Np, K, Ktot, totalNodes int
@@ -573,7 +573,10 @@ func CalculatePhysicalDerivative(t *testing.T, device *gocca.OCCADevice,
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 	// Execute differentiation
+	start := time.Now()
 	err = kp.RunKernel(kernelName)
+	stop := time.Now()
+	elapsed = stop.Sub(start)
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
@@ -666,10 +669,9 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 			device = utils.CreateTestDevice()
 		}
 		defer device.Free()
-		start := time.Now()
-		DuDx, DuDy, DuDz := CalculatePhysicalDerivative(t, device, k, tn,
+		DuDx, DuDy, DuDz, elapsed := CalculatePhysicalDerivative(t, device, k,
+			tn,
 			U, Rx, Ry, Rz, Sx, Sy, Sz, Tx, Ty, Tz)
-		end := time.Now()
 
 		for i := range DuDxXp {
 			assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDzXp[i]).RawMatrix().Data,
@@ -680,8 +682,8 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 				mat.DenseCopyOf(DuDy[i]).RawMatrix().Data, 1.e-8, "")
 		}
 		t.Logf("%s calculation of physical derivative validates", DevName)
-		t.Logf("%s calculation took %5.2f Seconds", DevName,
-			float64(end.Sub(start).Milliseconds())/1000.)
+		t.Logf("%s calculation took %5.4f Milliseconds", DevName,
+			float64(elapsed.Microseconds())/1000.)
 	}
 }
 
