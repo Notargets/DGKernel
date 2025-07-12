@@ -11,6 +11,7 @@ import (
 	"math"
 	"sort"
 	"testing"
+	"time"
 )
 
 func TestTetNudgMatCopy(t *testing.T) {
@@ -580,11 +581,10 @@ func CalculatePhysicalDerivative(t *testing.T, device *gocca.OCCADevice,
 }
 
 func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
-	order := 4
+	order := 6
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Ktot := tn.K
 	Np := tn.Np
-	totalNodes := Np * Ktot
 	k := make([]int, 0)
 	if len(tn.Mesh.EToP) != 0 {
 		// Count elements per partition
@@ -618,26 +618,6 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		k = []int{Ktot}
 	}
 	fmt.Printf("Partition K: %v\n", k)
-	props := tn.GetProperties()
-
-	// device := utils.CreateTestDevice()
-	device := utils.CreateTestDevice(true)
-	defer device.Free()
-
-	kp := runner.NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
-	})
-	// defer kp.Free()
-
-	// Collect all matrices into param builders
-	matrices := tn.GetRefMatrices()
-	params := make([]*builder.ParamBuilder, 0, len(matrices)+2)
-
-	// Add matrices as parameters
-	for name, mat := range matrices {
-		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
-	}
 
 	Uw := mat.NewDense(Np, Ktot, nil)
 	DuDxExpected := mat.NewDense(Np, Ktot, nil)
@@ -658,104 +638,6 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 		}
 	}
 
-	// Use matrices for the host output to get the automatic conversion to
-	// row-major storage format
-	DuDx := splitMatrix(k, mat.NewDense(Np, Ktot, nil))
-	DuDy := splitMatrix(k, mat.NewDense(Np, Ktot, nil))
-	DuDz := splitMatrix(k, mat.NewDense(Np, Ktot, nil))
-	U := splitMatrix(k, Uw)
-	Rx, Ry, Rz := splitMatrix(k, tn.Rx), splitMatrix(k, tn.Ry), splitMatrix(k, tn.Rz)
-	Sx, Sy, Sz := splitMatrix(k, tn.Sx), splitMatrix(k, tn.Sy), splitMatrix(k, tn.Sz)
-	Tx, Ty, Tz := splitMatrix(k, tn.Tx), splitMatrix(k, tn.Ty), splitMatrix(k, tn.Tz)
-	// Add array parameters
-	params = append(params,
-		builder.Input("U").Bind(U).CopyTo(),
-		builder.Input("Rx").Bind(Rx).CopyTo(),
-		builder.Input("Sx").Bind(Sx).CopyTo(),
-		builder.Input("Tx").Bind(Tx).CopyTo(),
-		builder.Input("Ry").Bind(Ry).CopyTo(),
-		builder.Input("Sy").Bind(Sy).CopyTo(),
-		builder.Input("Ty").Bind(Ty).CopyTo(),
-		builder.Input("Rz").Bind(Rz).CopyTo(),
-		builder.Input("Sz").Bind(Sz).CopyTo(),
-		builder.Input("Tz").Bind(Tz).CopyTo(),
-		builder.Output("DuDx").Bind(DuDx).CopyBack(),
-		builder.Output("DuDy").Bind(DuDy).CopyBack(),
-		builder.Output("DuDz").Bind(DuDz).CopyBack(),
-		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
-		builder.Temp("Us").Type(builder.Float64).Size(totalNodes),
-		builder.Temp("Ut").Type(builder.Float64).Size(totalNodes),
-	)
-
-	// Define kernel with all parameters
-	kernelName := "differentiate"
-	err := kp.DefineKernel(kernelName, params...)
-	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
-	}
-
-	// Get signature and build kernel
-	signature, _ := kp.GetKernelSignature(kernelName)
-	kernelSource := fmt.Sprintf(`
-#define NP %d
-
-@kernel void %s(%s) {
-    for (int part = 0; part < NPART; ++part; @outer) {
-        const real_t* U = U_PART(part);
-        real_t* Ur = Ur_PART(part);
-        real_t* Us = Us_PART(part);
-        real_t* Ut = Ut_PART(part);
-        MATMUL_Dr_%s(U, Ur, K[part]);
-        MATMUL_Ds_%s(U, Us, K[part]);
-        MATMUL_Dt_%s(U, Ut, K[part]);
-
-        real_t* DuDx = DuDx_PART(part);
-        real_t* DuDy = DuDy_PART(part);
-        real_t* DuDz = DuDz_PART(part);
-        const real_t* Rx = Rx_PART(part);
-        const real_t* Sx = Sx_PART(part);
-        const real_t* Tx = Tx_PART(part);
-        const real_t* Ry = Ry_PART(part);
-        const real_t* Sy = Sy_PART(part);
-        const real_t* Ty = Ty_PART(part);
-        const real_t* Rz = Rz_PART(part);
-        const real_t* Sz = Sz_PART(part);
-        const real_t* Tz = Tz_PART(part);
-        // ************************************************************
-		// *** This computation is happening in column-major format ***
-        // ************************************************************
-		// Multiple partitions means we need to check bounds
-        // for (int n = 0; n < NP; ++n; @inner) {
-        for (int k = 0; k < KpartMax; ++k; @inner) {
-            	if (k < K[part]) {  // Bounds check for partition size
-        		for (int n = 0; n < NP; ++n) {
-        	// for (int k = 0; k < KpartMax; ++k) {
-            // 	if (k < K[part]) {  // Bounds check for partition size
-                	int i = n + k*NP;  // Column-major indexing
-					DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
-					DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
-					DuDz[i] = Rz[i]*Ur[i] + Sz[i]*Us[i] + Tz[i]*Ut[i];
-				}
-			}
-		}
-        // ************************************************************
-		// ** When DuDx... are copied back to host they r transposed **
-        // ************************************************************
-    }
-}
-`, tn.Np, kernelName, signature,
-		props.ShortName, props.ShortName, props.ShortName)
-
-	_, err = kp.BuildKernel(kernelSource, kernelName)
-	if err != nil {
-		t.Fatalf("Failed to build kernel: %v", err)
-	}
-	// Execute differentiation
-	err = kp.RunKernel(kernelName)
-	if err != nil {
-		t.Fatalf("Kernel execution failed: %v", err)
-	}
-
 	DuDxH, DuDyH, DuDzH := calcPhysicalDerivative(Uw, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
 		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
 
@@ -764,18 +646,43 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzH, 1.e-8, "")
 	fmt.Println("Host calculation of physical derivative validates")
 
+	// Split the host matrices into partitions to compare to device outputs
 	DuDxXp := splitMatrix(k, DuDxExpected)
 	DuDyXp := splitMatrix(k, DuDyExpected)
 	DuDzXp := splitMatrix(k, DuDzExpected)
-	for i := range DuDxXp {
-		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDzXp[i]).RawMatrix().Data,
-			mat.DenseCopyOf(DuDz[i]).RawMatrix().Data, 1.e-8, "")
-		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDxXp[i]).RawMatrix().Data,
-			mat.DenseCopyOf(DuDx[i]).RawMatrix().Data, 1.e-8, "")
-		assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDyXp[i]).RawMatrix().Data,
-			mat.DenseCopyOf(DuDy[i]).RawMatrix().Data, 1.e-8, "")
+
+	// Use matrices for the host output to get the automatic conversion to
+	// row-major storage format
+	U := splitMatrix(k, Uw)
+	Rx, Ry, Rz := splitMatrix(k, tn.Rx), splitMatrix(k, tn.Ry), splitMatrix(k, tn.Rz)
+	Sx, Sy, Sz := splitMatrix(k, tn.Sx), splitMatrix(k, tn.Sy), splitMatrix(k, tn.Sz)
+	Tx, Ty, Tz := splitMatrix(k, tn.Tx), splitMatrix(k, tn.Ty), splitMatrix(k, tn.Tz)
+
+	for _, DevName := range []string{"CUDA", "OpenMP"} {
+		var device *gocca.OCCADevice
+		if DevName == "CUDA" {
+			device = utils.CreateTestDevice(true)
+		} else {
+			device = utils.CreateTestDevice()
+		}
+		defer device.Free()
+		start := time.Now()
+		DuDx, DuDy, DuDz := CalculatePhysicalDerivative(t, device, k, tn,
+			U, Rx, Ry, Rz, Sx, Sy, Sz, Tx, Ty, Tz)
+		end := time.Now()
+
+		for i := range DuDxXp {
+			assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDzXp[i]).RawMatrix().Data,
+				mat.DenseCopyOf(DuDz[i]).RawMatrix().Data, 1.e-8, "")
+			assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDxXp[i]).RawMatrix().Data,
+				mat.DenseCopyOf(DuDx[i]).RawMatrix().Data, 1.e-8, "")
+			assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDyXp[i]).RawMatrix().Data,
+				mat.DenseCopyOf(DuDy[i]).RawMatrix().Data, 1.e-8, "")
+		}
+		t.Logf("%s calculation of physical derivative validates", DevName)
+		t.Logf("%s calculation took %5.2f Seconds", DevName,
+			float64(end.Sub(start).Milliseconds())/1000.)
 	}
-	fmt.Println("Device calculation of physical derivative validates")
 }
 
 func calcPhysicalDerivative(UM, RxM, RyM, RzM, SxM, SyM, SzM, TxM, TyM,
