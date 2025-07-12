@@ -49,7 +49,7 @@ func (kr *Runner) GetKernelArguments() []KernelArgument {
 	}
 
 	// 3. Allocated arrays (global pointer and offsets for each)
-	for _, arrayName := range kr.AllocatedArrays {
+	for _, arrayName := range kr.GetAllocatedArrays() {
 		// Get the actual metadata instead of guessing
 		metadata, exists := kr.arrayMetadata[arrayName]
 		if !exists {

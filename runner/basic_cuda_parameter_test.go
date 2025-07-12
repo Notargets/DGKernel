@@ -359,7 +359,7 @@ func TestTraceAllocatedArrays(t *testing.T) {
 	}
 
 	// Step 5: Generate preamble and check for macros
-	preamble := kp.GeneratePreamble()
+	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
 	t.Log("Generated preamble:")
 
 	// Check for partition macros
@@ -427,7 +427,7 @@ func TestSimplestCudaScalar(t *testing.T) {
 	t.Logf("AllocatedArrays: %v", kp.GetAllocatedArrays())
 
 	// Generate and print preamble
-	preamble := kp.GeneratePreamble()
+	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
 
 	// Extract just the partition macros section
 	lines := strings.Split(preamble, "\n")

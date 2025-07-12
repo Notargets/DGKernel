@@ -54,9 +54,6 @@ type Builder struct {
 	// Device matrices to allocate in global memory (NEW)
 	DeviceMatrices map[string]mat.Matrix
 
-	// Array tracking for macro generation
-	AllocatedArrays []string
-
 	// Generated code
 	KernelPreamble string
 }
@@ -90,14 +87,13 @@ func NewBuilder(cfg Config) *Builder {
 		intType = INT64
 	}
 	kb := &Builder{
-		NumPartitions:   len(cfg.K),
-		K:               make([]int, len(cfg.K)),
-		KpartMax:        kpartMax,
-		FloatType:       floatType,
-		IntType:         intType,
-		StaticMatrices:  make(map[string]mat.Matrix),
-		DeviceMatrices:  make(map[string]mat.Matrix), // NEW: Initialize DeviceMatrices
-		AllocatedArrays: []string{},
+		NumPartitions:  len(cfg.K),
+		K:              make([]int, len(cfg.K)),
+		KpartMax:       kpartMax,
+		FloatType:      floatType,
+		IntType:        intType,
+		StaticMatrices: make(map[string]mat.Matrix),
+		DeviceMatrices: make(map[string]mat.Matrix), // NEW: Initialize DeviceMatrices
 	}
 	// Copy K values
 	copy(kb.K, cfg.K)
@@ -112,10 +108,6 @@ func (kb *Builder) AddStaticMatrix(name string, m mat.Matrix) {
 // AddDeviceMatrix adds a matrix to be allocated in device global memory (NEW)
 func (kb *Builder) AddDeviceMatrix(name string, m mat.Matrix) {
 	kb.DeviceMatrices[name] = m
-}
-
-func (kb *Builder) GetAllocatedArrays() []string {
-	return kb.AllocatedArrays
 }
 
 // CalculateAlignedOffsetsAndSize computes partition offsets with alignment
@@ -180,7 +172,7 @@ func (kb *Builder) GetTotalElements() int {
 }
 
 // GeneratePreamble generates the kernel preamble with static data and utilities
-func (kb *Builder) GeneratePreamble() string {
+func (kb *Builder) GeneratePreamble(allocatedArrays []string) string {
 	var sb strings.Builder
 
 	// 1. Type definitions and constants
@@ -190,7 +182,7 @@ func (kb *Builder) GeneratePreamble() string {
 	sb.WriteString(kb.generateStaticMatrices())
 
 	// 3. Partition access macros
-	sb.WriteString(kb.generatePartitionMacros())
+	sb.WriteString(kb.generatePartitionMacros(allocatedArrays))
 
 	// 4. Matrix operation macros with @inner
 	sb.WriteString(kb.generateMatrixMacros())
@@ -296,13 +288,13 @@ func (kb *Builder) formatStaticMatrix(name string, m mat.Matrix) string {
 }
 
 // generatePartitionMacros creates macros for accessing partitioned data
-func (kb *Builder) generatePartitionMacros() string {
+func (kb *Builder) generatePartitionMacros(allocatedArrays []string) string {
 	var sb strings.Builder
 
 	sb.WriteString("// Partition access macros\n")
 
 	// Generate macro for each allocated array
-	for _, arrayName := range kb.AllocatedArrays {
+	for _, arrayName := range allocatedArrays {
 		sb.WriteString(fmt.Sprintf("#define %s_PART(part) (%s_global + %s_offsets[part])\n",
 			arrayName, arrayName, arrayName))
 	}

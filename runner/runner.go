@@ -81,7 +81,7 @@ func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) erro
 	}
 
 	// NEW: Validate offsets before kernel execution
-	for _, arrayName := range kr.AllocatedArrays {
+	for _, arrayName := range kr.GetAllocatedArrays() {
 		if err := kr.validateOffsets(arrayName, "before kernel "+kernelName); err != nil {
 			fmt.Printf("Pre-kernel validation failed: %v\n", err)
 		}
@@ -106,7 +106,7 @@ func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) erro
 	kr.Device.Finish()
 
 	// NEW: Validate offsets after kernel execution
-	for _, arrayName := range kr.AllocatedArrays {
+	for _, arrayName := range kr.GetAllocatedArrays() {
 		if err := kr.validateOffsets(arrayName, "after kernel "+kernelName); err != nil {
 			fmt.Printf("Post-kernel validation failed: %v\n", err)
 			// This tells us the kernel is corrupting offset memory
@@ -350,7 +350,7 @@ func (kr *Runner) GetIntSize() int {
 
 // BuildKernel compiles and registers a kernel with the program
 func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
-	kr.GeneratePreamble()
+	kr.GeneratePreamble(kr.GetAllocatedArrays())
 
 	// Combine preamble with kernel source
 	fullSource := kr.KernelPreamble + "\n" + kernelSource
@@ -432,7 +432,6 @@ func (kr *Runner) allocateSingleArray(spec builder.ArraySpec, paramSpec *builder
 	}
 
 	// Track allocation
-	kr.AllocatedArrays = append(kr.AllocatedArrays, spec.Name)
 	kr.arrayMetadata[spec.Name] = ArrayMetadata{
 		spec:      spec,
 		dataType:  spec.DataType,

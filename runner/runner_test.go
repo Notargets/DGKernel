@@ -112,7 +112,7 @@ func TestDGKernel_CodeGen_TypesAndConstants(t *testing.T) {
 	})
 	defer kp.Free()
 
-	preamble := kp.GeneratePreamble()
+	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
 
 	// Check type definitions
 	expectedTypes := []string{
@@ -153,7 +153,7 @@ func TestDGKernel_CodeGen_MatrixMacroStructure(t *testing.T) {
 	})
 	kp.AddStaticMatrix("Dr", Dr)
 
-	preamble := kp.GeneratePreamble()
+	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
 
 	// Verify matrix declaration
 	if !strings.Contains(preamble, "const double Dr[3][3]") {
@@ -514,7 +514,7 @@ func TestDGKernel_EdgeCases_DegeneratePartitions(t *testing.T) {
 			}
 
 			// Verify preamble contains correct value
-			preamble := kp.GeneratePreamble()
+			preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
 			expected := fmt.Sprintf("#define KpartMax %d", tc.expectedKMax)
 			if !strings.Contains(preamble, expected) {
 				t.Errorf("Preamble missing: %s", expected)
