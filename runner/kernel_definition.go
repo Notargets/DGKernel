@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
 	"gonum.org/v1/gonum/mat"
-	"strings"
 )
 
 // KernelDefinition holds all information about a defined kernel
 type KernelDefinition struct {
 	Name       string
 	Parameters []builder.ParamSpec
-	Signature  string
 }
 
 // DefineKernel defines a kernel with its parameters using the new API
@@ -42,11 +40,9 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilde
 		kr.kernelDefinitions = make(map[string]*KernelDefinition)
 	}
 
-	signature := kr.generateSignatureFromParams(paramSpecs)
 	kr.kernelDefinitions[kernelName] = &KernelDefinition{
 		Name:       kernelName,
 		Parameters: paramSpecs,
-		Signature:  signature,
 	}
 
 	return nil
@@ -109,7 +105,7 @@ func (kr *Runner) allocateTempArray(spec *builder.ParamSpec) error {
 		IsOutput:  true, // Temp arrays are writable
 	}
 
-	return kr.allocateSingleArray(arraySpec)
+	return kr.allocateSingleArray(arraySpec, spec)
 }
 
 // allocateArrayFromSpec allocates an array from parameter specification
@@ -127,7 +123,7 @@ func (kr *Runner) allocateArrayFromSpec(spec *builder.ParamSpec) error {
 	}
 
 	// Allocate
-	if err := kr.allocateSingleArray(arraySpec); err != nil {
+	if err := kr.allocateSingleArray(arraySpec, spec); err != nil {
 		return err
 	}
 
@@ -232,53 +228,4 @@ func (kr *Runner) verifyExistingAllocation(spec *builder.ParamSpec) error {
 	}
 
 	return nil
-}
-
-// generateSignatureFromParams creates kernel signature from parameters
-func (kr *Runner) generateSignatureFromParams(params []builder.ParamSpec) string {
-	var parts []string
-
-	// K array is always first
-	parts = append(parts, "const int_t* K")
-
-	// Add device matrices in sorted order
-	deviceMatrixNames := make([]string, 0)
-	for _, p := range params {
-		if p.IsMatrix && !p.IsStatic {
-			deviceMatrixNames = append(deviceMatrixNames, p.Name)
-		}
-	}
-	SortStrings(deviceMatrixNames)
-
-	for _, name := range deviceMatrixNames {
-		parts = append(parts, fmt.Sprintf("const real_t* %s", name))
-	}
-
-	// Add arrays
-	for _, p := range params {
-		if p.Direction == builder.DirectionScalar || (p.IsMatrix && !p.IsStatic) {
-			continue // Skip scalars and already-added matrices
-		}
-
-		if !p.IsMatrix {
-			// Regular array
-			constStr := ""
-			if p.IsConst() {
-				constStr = "const "
-			}
-			parts = append(parts,
-				fmt.Sprintf("%sreal_t* %s_global", constStr, p.Name),
-				fmt.Sprintf("const int_t* %s_offsets", p.Name))
-		}
-	}
-
-	// Add scalars last
-	for _, p := range params {
-		if p.Direction == builder.DirectionScalar {
-			typeStr := GetScalarTypeName(p.DataType)
-			parts = append(parts, fmt.Sprintf("const %s %s", typeStr, p.Name))
-		}
-	}
-
-	return strings.Join(parts, ",\n\t")
 }

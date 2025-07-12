@@ -80,7 +80,6 @@ func TestScalarMinimal(t *testing.T) {
 		def := kp.kernelDefinitions["printtest"]
 		t.Logf("\nKernel Definition for 'printtest':")
 		t.Logf("  Name: %s", def.Name)
-		t.Logf("  Signature:\n%s", def.Signature)
 		t.Logf("  Parameters:")
 		for i, p := range def.Parameters {
 			t.Logf("    [%d] %s: Direction=%v, DataType=%v, Binding=%v",

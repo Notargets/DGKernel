@@ -5,14 +5,16 @@ import (
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
 	"gonum.org/v1/gonum/mat"
+	"strings"
 	"unsafe"
 )
 
 // ArrayMetadata stores information about allocated arrays
 type ArrayMetadata struct {
-	spec     builder.ArraySpec
-	dataType builder.DataType
-	isOutput bool
+	spec      builder.ArraySpec
+	dataType  builder.DataType
+	isOutput  bool
+	paramSpec *builder.ParamSpec
 }
 
 // Runner orchestrates kernel compilation and execution with flexible parameter handling
@@ -210,15 +212,31 @@ func (kr *Runner) buildKernelArguments(def *KernelDefinition,
 	return args, nil
 }
 
-// GetKernelSignature returns the signature for a defined kernel
+// GetKernelSignature generates the signature for a defined kernel
 func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
 	def, exists := kr.kernelDefinitions[kernelName]
-	if exists {
-		return def.Signature, nil
+	if !exists {
+		return "", fmt.Errorf("kernel %s not defined", kernelName)
 	}
 
-	// Fall back to old method for backward compatibility
-	return kr.GenerateKernelSignature(), nil
+	args := kr.GetKernelArgumentsForDefinition(def)
+	params := make([]string, 0, len(args))
+
+	for _, karg := range args {
+		if karg.Category == "scalar" {
+			// Scalars have explicit const in the type
+			params = append(params, fmt.Sprintf("const %s %s", karg.Type, karg.Name))
+		} else {
+			// Arrays and matrices
+			constStr := ""
+			if karg.IsConst {
+				constStr = "const "
+			}
+			params = append(params, fmt.Sprintf("%s%s %s", constStr, karg.Type, karg.Name))
+		}
+	}
+
+	return strings.Join(params, ",\n\t"), nil
 }
 
 // AddStaticMatrix adds a matrix that will be embedded as static const in kernels
@@ -378,7 +396,8 @@ func (kr *Runner) Free() {
 }
 
 // Modified allocateSingleArray in runner/runner.go
-func (kr *Runner) allocateSingleArray(spec builder.ArraySpec) error {
+func (kr *Runner) allocateSingleArray(spec builder.ArraySpec, paramSpec *builder.ParamSpec) error {
+
 	// Calculate aligned offsets and total size
 	offsets, totalSize := kr.CalculateAlignedOffsetsAndSize(spec)
 
@@ -415,9 +434,10 @@ func (kr *Runner) allocateSingleArray(spec builder.ArraySpec) error {
 	// Track allocation
 	kr.AllocatedArrays = append(kr.AllocatedArrays, spec.Name)
 	kr.arrayMetadata[spec.Name] = ArrayMetadata{
-		spec:     spec,
-		dataType: spec.DataType,
-		isOutput: spec.IsOutput,
+		spec:      spec,
+		dataType:  spec.DataType,
+		isOutput:  spec.IsOutput,
+		paramSpec: paramSpec,
 	}
 
 	return nil
