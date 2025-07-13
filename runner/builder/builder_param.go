@@ -341,8 +341,13 @@ func (p *ParamSpec) NeedsCopyBack() bool {
 
 // GetEffectiveType returns the type to use on device (considering conversion)
 func (p *ParamSpec) GetEffectiveType() DataType {
+	// ConvertType specifies the device type for ALL arrays (input, output, inout)
+	// For inputs: converts from host type to device type during CopyTo
+	// For outputs: converts from device type to host type during CopyBack
+
 	if p.ConvertType != 0 {
-		return p.ConvertType
+		return p.ConvertType // This is the device type
 	}
+
 	return p.DataType
 }

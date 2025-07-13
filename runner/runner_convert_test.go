@@ -31,7 +31,7 @@ func TestConvert_BasicFloat64ToFloat32(t *testing.T) {
 	// Define kernel with conversion
 	err := kp.DefineKernel("convert_test",
 		builder.Input("input").Bind(hostInput).CopyTo().Convert(builder.Float32),
-		builder.Output("output").Bind(hostOutput).CopyBack().Convert(builder.Float64),
+		builder.Output("output").Bind(hostOutput).CopyBack().Convert(builder.Float32), // Changed!
 	)
 	if err != nil {
 		t.Fatalf("Failed to define kernel: %v", err)
@@ -443,4 +443,120 @@ func TestConvert_NoConversion(t *testing.T) {
 		}
 	}
 	t.Log("✓ No conversion case works correctly")
+}
+
+// TestConvert_PartitionedDataDebug - Debug version to trace the issue
+func TestConvert_PartitionedDataDebug(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	k := []int{5, 7, 6}
+	kp := NewRunner(device, builder.Config{
+		K:         k,
+		FloatType: builder.Float64, // Device uses float64
+	})
+	defer kp.Free()
+
+	// Host data in float32 (partitioned)
+	hostInput := [][]float32{
+		make([]float32, k[0]),
+		make([]float32, k[1]),
+		make([]float32, k[2]),
+	}
+	hostOutput := [][]float32{
+		make([]float32, k[0]),
+		make([]float32, k[1]),
+		make([]float32, k[2]),
+	}
+
+	// Initialize with distinct values
+	for p := range k {
+		for i := 0; i < k[p]; i++ {
+			hostInput[p][i] = float32(p*100 + i)
+		}
+	}
+
+	t.Logf("Initial hostInput:")
+	for p := range k {
+		t.Logf("  Partition %d: %v", p, hostInput[p])
+	}
+
+	// Define kernel with conversion for partitioned data
+	err := kp.DefineKernel("partitioned_convert",
+		builder.Input("input").Bind(hostInput).CopyTo().Convert(builder.Float64),      // Convert to float64 on device
+		builder.Output("output").Bind(hostOutput).CopyBack().Convert(builder.Float32), // Device should use float32
+	)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
+	}
+
+	// Check array metadata
+	t.Log("\n=== Array Metadata ===")
+	for name := range kp.arrayMetadata {
+		meta, _ := kp.GetArrayMetadata(name)
+		t.Logf("Array %s: dataType=%v, size=%d bytes",
+			name, meta.dataType, meta.spec.Size)
+		if meta.paramSpec != nil {
+			t.Logf("  ParamSpec: DataType=%v, ConvertType=%v, EffectiveType=%v",
+				meta.paramSpec.DataType, meta.paramSpec.ConvertType,
+				meta.paramSpec.GetEffectiveType())
+		}
+	}
+
+	// Check offsets
+	t.Log("\n=== Partition Offsets ===")
+	inputOffsets, _ := kp.readPartitionOffsets("input")
+	outputOffsets, _ := kp.readPartitionOffsets("output")
+	t.Logf("Input offsets: %v", inputOffsets)
+	t.Logf("Output offsets: %v", outputOffsets)
+
+	signature, _ := kp.GetKernelSignature("partitioned_convert")
+	t.Logf("\nGenerated signature:\n%s", signature)
+
+	// Simple kernel that adds 1000
+	kernelSource := fmt.Sprintf(`
+@kernel void partitioned_convert(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		const real_t* input = input_PART(part);
+		real_t* output = output_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				output[i] = input[i] + 1000.0;
+			}
+		}
+	}
+}`, signature)
+
+	_, err = kp.BuildKernel(kernelSource, "partitioned_convert")
+	if err != nil {
+		t.Fatalf("Failed to build kernel: %v", err)
+	}
+
+	// Run kernel
+	err = kp.RunKernel("partitioned_convert")
+	if err != nil {
+		t.Fatalf("Kernel execution failed: %v", err)
+	}
+
+	// Manual device read to check what's actually there
+	t.Log("\n=== Manual Device Read ===")
+	outputMem := kp.GetMemory("output")
+	if outputMem != nil {
+		// Read partition 0 as float32 (what should be on device)
+		deviceData32 := make([]float32, k[0])
+		outputMem.CopyTo(unsafe.Pointer(&deviceData32[0]), int64(k[0]*4))
+		t.Logf("Partition 0 data (as float32): %v", deviceData32)
+
+		// Also check the raw memory pattern
+		rawBytes := make([]byte, 32) // First 32 bytes
+		outputMem.CopyTo(unsafe.Pointer(&rawBytes[0]), 32)
+		t.Logf("First 32 bytes of output memory: %x", rawBytes)
+	}
+
+	// Check results
+	t.Log("\n=== Results ===")
+	for p := range k {
+		t.Logf("Partition %d output: %v", p, hostOutput[p])
+	}
 }

@@ -514,7 +514,7 @@ func (kr *Runner) copyFloat64PartitionsFromDevice(data [][]float64, deviceMem *g
 			// Read as float32 and convert to float64
 			temp := make([]float32, len(partition))
 			partitionBytes := int64(len(temp) * 4)
-			offsetBytes := offsets[i] * 4
+			offsetBytes := offsets[i] * 4 // FIX: Use sourceType size (4 bytes for float32)
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
 
 			// Convert to float64
@@ -522,9 +522,9 @@ func (kr *Runner) copyFloat64PartitionsFromDevice(data [][]float64, deviceMem *g
 				partition[j] = float64(v)
 			}
 		} else {
-			// Direct copy
+			// Direct copy - device has float64, host has float64
 			partitionBytes := int64(len(partition) * 8)
-			offsetBytes := offsets[i] * 8
+			offsetBytes := offsets[i] * 8 // offsets[i] is in elements, multiply by element size
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
 		}
 	}
@@ -542,20 +542,13 @@ func (kr *Runner) copyFloat32PartitionsFromDevice(data [][]float32, deviceMem *g
 		}
 
 		if needsConversion && sourceType == builder.Float64 {
-			// Read as float64 and convert to float32
-			temp := make([]float64, len(partition))
-			partitionBytes := int64(len(temp) * 8)
-			offsetBytes := offsets[i] * 8
-			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
-
-			// Convert to float32
-			for j, v := range temp {
-				partition[j] = float32(v)
-			}
+			// WRONG: Device has float64, but output specified Float32 allocation
+			// This shouldn't happen with proper GetEffectiveType implementation
+			return fmt.Errorf("invalid conversion: output array on device should match Convert type")
 		} else {
-			// Direct copy
+			// Direct copy - device has float32, host has float32
 			partitionBytes := int64(len(partition) * 4)
-			offsetBytes := offsets[i] * 4
+			offsetBytes := offsets[i] * 4 // offsets[i] is in elements, multiply by element size
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
 		}
 	}
