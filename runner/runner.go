@@ -253,67 +253,6 @@ func (kr *Runner) validateOffsets(name string, context string) error {
 	return nil
 }
 
-// Key changes to runner.go:
-
-// Remove AllocateAndSetArrays method entirely
-
-// Remove old RunKernel variant that takes array names
-// Keep only this version:
-func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
-	// Get kernel definition
-	def, exists := kr.kernelDefinitions[kernelName]
-	if !exists {
-		return fmt.Errorf("kernel %s not defined - use DefineKernel first", kernelName)
-	}
-
-	// Get compiled kernel
-	kernel, exists := kr.Kernels[kernelName]
-	if !exists {
-		return fmt.Errorf("kernel %s not compiled", kernelName)
-	}
-
-	// Validate offsets before kernel execution
-	for _, arrayName := range kr.GetAllocatedArrays() {
-		if err := kr.validateOffsets(arrayName, "before kernel "+kernelName); err != nil {
-			fmt.Printf("Pre-kernel validation failed: %v\n", err)
-		}
-	}
-
-	// Perform pre-kernel data copies (host→device)
-	if err := kr.performPreKernelCopies(def); err != nil {
-		return fmt.Errorf("pre-kernel copy failed: %w", err)
-	}
-
-	// Build kernel arguments
-	args, err := kr.buildKernelArguments(def, scalarValues)
-	if err != nil {
-		return fmt.Errorf("failed to build arguments: %w", err)
-	}
-
-	// Execute kernel
-	if err := kernel.RunWithArgs(args...); err != nil {
-		return fmt.Errorf("kernel execution failed: %w", err)
-	}
-
-	kr.Device.Finish()
-
-	// Validate offsets after kernel execution
-	for _, arrayName := range kr.GetAllocatedArrays() {
-		if err := kr.validateOffsets(arrayName, "after kernel "+kernelName); err != nil {
-			fmt.Printf("Post-kernel validation failed: %v\n", err)
-		}
-	}
-
-	// Perform post-kernel data copies (device→host)
-	if err := kr.performPostKernelCopies(def); err != nil {
-		return fmt.Errorf("post-kernel copy failed: %w", err)
-	}
-
-	return nil
-}
-
-// Remove buildKernelArgs method entirely
-
 // Make matrix methods internal (lowercase first letter)
 func (kr *Runner) addStaticMatrix(name string, m mat.Matrix) {
 	kr.Builder.AddStaticMatrix(name, m)
@@ -422,15 +361,11 @@ func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKerne
 	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
 }
 
-// generatePreambleWithTypes is a helper method for testing/debugging
-// NEW method to support Phase 2
 func (kr *Runner) generatePreambleWithTypes() string {
 	arrayTypes := kr.collectArrayTypes()
 	return kr.Builder.GeneratePreamble(kr.GetAllocatedArrays(), arrayTypes)
 }
 
-// GetArrayType returns the data type of an allocated array
-// Existing method - no changes needed
 func (kr *Runner) GetArrayType(name string) (builder.DataType, error) {
 	metadata, exists := kr.arrayMetadata[name]
 	if !exists {
@@ -439,11 +374,6 @@ func (kr *Runner) GetArrayType(name string) (builder.DataType, error) {
 	return metadata.dataType, nil
 }
 
-// File: runner/runner.go
-// Update to AllocateDeviceMatrices method
-
-// AllocateDeviceMatrices allocates all device matrices that were added
-// MODIFIED: Gets type from array metadata instead of using kr.FloatType
 func (kr *Runner) AllocateDeviceMatrices() error {
 	// Allocate each device matrix
 	for name, matrix := range kr.DeviceMatrices {
@@ -488,11 +418,6 @@ func (kr *Runner) AllocateDeviceMatrices() error {
 	return nil
 }
 
-// File: runner/runner.go
-// Fix collectArrayTypes method to remove FloatType references
-
-// collectArrayTypes creates a map of array names to their effective data types
-// MODIFIED: Defaults to Float64 instead of kr.FloatType
 func (kr *Runner) collectArrayTypes() map[string]builder.DataType {
 	arrayTypes := make(map[string]builder.DataType)
 
@@ -526,4 +451,67 @@ func (kr *Runner) collectArrayTypes() map[string]builder.DataType {
 	}
 
 	return arrayTypes
+}
+
+// In runner/runner.go, update RunKernel to skip offset validation for device matrices:
+
+func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
+	// Get kernel definition
+	def, exists := kr.kernelDefinitions[kernelName]
+	if !exists {
+		return fmt.Errorf("kernel %s not defined - use DefineKernel first", kernelName)
+	}
+
+	// Get compiled kernel
+	kernel, exists := kr.Kernels[kernelName]
+	if !exists {
+		return fmt.Errorf("kernel %s not compiled", kernelName)
+	}
+
+	// Validate offsets before kernel execution
+	for _, arrayName := range kr.GetAllocatedArrays() {
+		// Skip validation if this is a device matrix (stored without _global suffix)
+		if _, isDeviceMatrix := kr.DeviceMatrices[arrayName]; isDeviceMatrix {
+			continue
+		}
+		if err := kr.validateOffsets(arrayName, "before kernel "+kernelName); err != nil {
+			fmt.Printf("Pre-kernel validation failed: %v\n", err)
+		}
+	}
+
+	// Perform pre-kernel data copies (host→device)
+	if err := kr.performPreKernelCopies(def); err != nil {
+		return fmt.Errorf("pre-kernel copy failed: %w", err)
+	}
+
+	// Build kernel arguments
+	args, err := kr.buildKernelArguments(def, scalarValues)
+	if err != nil {
+		return fmt.Errorf("failed to build arguments: %w", err)
+	}
+
+	// Execute kernel
+	if err := kernel.RunWithArgs(args...); err != nil {
+		return fmt.Errorf("kernel execution failed: %w", err)
+	}
+
+	kr.Device.Finish()
+
+	// Validate offsets after kernel execution
+	for _, arrayName := range kr.GetAllocatedArrays() {
+		// Skip validation if this is a device matrix (stored without _global suffix)
+		if _, isDeviceMatrix := kr.DeviceMatrices[arrayName]; isDeviceMatrix {
+			continue
+		}
+		if err := kr.validateOffsets(arrayName, "after kernel "+kernelName); err != nil {
+			fmt.Printf("Post-kernel validation failed: %v\n", err)
+		}
+	}
+
+	// Perform post-kernel data copies (device→host)
+	if err := kr.performPostKernelCopies(def); err != nil {
+		return fmt.Errorf("post-kernel copy failed: %w", err)
+	}
+
+	return nil
 }
