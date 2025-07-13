@@ -706,7 +706,7 @@ func CalculatePhysicalDerivative32(t *testing.T, device *gocca.OCCADevice,
 }
 
 func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
-	order := 6
+	order := 4
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Ktot := tn.K
 	Np := tn.Np

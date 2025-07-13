@@ -336,8 +336,8 @@ func TestRunner_TypeConversion(t *testing.T) {
 	kernelSource := fmt.Sprintf(`
 @kernel void convert_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const double* input = input_PART(part);
-		double* output = output_PART(part);
+		const float* input = input_PART(part);
+		float* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
