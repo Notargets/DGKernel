@@ -602,28 +602,6 @@ func (kr *Runner) copyMatrixFromDevice(matrix mat.Matrix, mem *gocca.OCCAMemory,
 	return nil
 }
 
-// copyDirectToDevice performs direct copy to device without conversion
-// MODIFIED: Updated to handle matrices with type parameter
-func (kr *Runner) copyDirectToDevice(hostData interface{}, mem *gocca.OCCAMemory) error {
-	switch data := hostData.(type) {
-	case []float64:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-	case []float32:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
-	case []int32:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
-	case []int64:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-	case mat.Matrix:
-		// Need to determine the matrix type from metadata
-		// This will be called from copyToDeviceWithConversion which has the type info
-		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixToDevice directly")
-	default:
-		return fmt.Errorf("unsupported type for direct copy: %T", data)
-	}
-	return nil
-}
-
 // copyDirectFromDevice performs direct copy from device without conversion
 // MODIFIED: Updated to handle matrices with type parameter
 func (kr *Runner) copyDirectFromDevice(hostData interface{}, mem *gocca.OCCAMemory, size int64) error {
@@ -644,39 +622,6 @@ func (kr *Runner) copyDirectFromDevice(hostData interface{}, mem *gocca.OCCAMemo
 		return fmt.Errorf("unsupported type for direct copy from device: %T", data)
 	}
 	return nil
-}
-
-// File: runner/kernel_copy.go
-// Updates to copy conversion methods to use ParamSpec types
-
-// copyToDeviceWithConversion handles host→device transfers with optional type conversion
-// MODIFIED: Now uses ParamSpec to determine types
-func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
-	if spec.HostBinding == nil {
-		return nil // Nothing to copy
-	}
-
-	mem := kr.GetMemory(spec.Name)
-	if mem == nil {
-		return fmt.Errorf("no device memory allocated for %s", spec.Name)
-	}
-
-	// Handle matrix types specially
-	if matrix, ok := spec.HostBinding.(mat.Matrix); ok {
-		return kr.copyMatrixToDevice(matrix, mem, spec.GetEffectiveType())
-	}
-
-	// For non-matrix types
-	hostType := spec.DataType
-	deviceType := spec.GetEffectiveType()
-
-	if hostType == deviceType {
-		// No conversion needed
-		return kr.copyDirectToDevice(spec.HostBinding, mem)
-	}
-
-	// Type conversion needed
-	return kr.copyWithTypeConversion(spec.HostBinding, mem, hostType, deviceType)
 }
 
 // copyFromDeviceWithConversion handles device→host transfers with optional type conversion
@@ -719,4 +664,66 @@ func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
 
 	// Type conversion needed
 	return kr.copyFromDeviceWithTypeConversion(mem, spec.HostBinding, deviceType, hostType, totalSize)
+}
+
+// copyDirectToDevice performs direct copy to device without conversion
+func (kr *Runner) copyDirectToDevice(hostData interface{}, mem *gocca.OCCAMemory) error {
+	switch data := hostData.(type) {
+	case []float64:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+	case []float32:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
+	case []int32:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
+	case []int64:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+	case mat.Matrix:
+		// Need to determine the matrix type from metadata
+		// This will be called from copyToDeviceWithConversion which has the type info
+		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixToDevice directly")
+	// Add support for partitioned data types
+	case [][]float64, [][]float32, [][]int32, [][]int64, []mat.Matrix:
+		return fmt.Errorf("partitioned data requires special handling - use copyPartitionedData directly")
+	default:
+		return fmt.Errorf("unsupported type for direct copy: %T", data)
+	}
+	return nil
+}
+
+// Also update copyToDeviceWithConversion to handle partitioned data properly:
+
+// copyToDeviceWithConversion handles host→device transfers with optional type conversion
+// MODIFIED: Now uses ParamSpec to determine types and handles partitioned data
+func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
+	if spec.HostBinding == nil {
+		return nil // Nothing to copy
+	}
+
+	// Get memory - this handles both partitioned and non-partitioned cases
+	mem := kr.GetMemory(spec.Name)
+	if mem == nil {
+		return fmt.Errorf("no device memory allocated for %s", spec.Name)
+	}
+
+	// Handle partitioned data types ([][]T format)
+	if spec.IsPartitioned {
+		return kr.copyPartitionedData(spec, mem)
+	}
+
+	// Handle matrix types specially
+	if matrix, ok := spec.HostBinding.(mat.Matrix); ok {
+		return kr.copyMatrixToDevice(matrix, mem, spec.GetEffectiveType())
+	}
+
+	// For non-matrix, non-partitioned types
+	hostType := spec.DataType
+	deviceType := spec.GetEffectiveType()
+
+	if hostType == deviceType {
+		// No conversion needed
+		return kr.copyDirectToDevice(spec.HostBinding, mem)
+	}
+
+	// Type conversion needed
+	return kr.copyWithTypeConversion(spec.HostBinding, mem, hostType, deviceType)
 }
