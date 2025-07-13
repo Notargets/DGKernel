@@ -1,9 +1,13 @@
+// File: runner/kernel_definition.go
+// Complete replacement implementing Phase 1: Array-specific type support
+
 package runner
 
 import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
 	"gonum.org/v1/gonum/mat"
+	"strings"
 )
 
 // KernelDefinition holds all information about a defined kernel
@@ -96,11 +100,12 @@ func (kr *Runner) processParameter(spec *builder.ParamSpec) error {
 
 // allocateTempArray allocates a device-only temporary array
 func (kr *Runner) allocateTempArray(spec *builder.ParamSpec) error {
-	// Create array spec
+	// Create array spec with effective type
+	effectiveType := spec.GetEffectiveType()
 	arraySpec := builder.ArraySpec{
 		Name:      spec.Name,
-		Size:      spec.Size * SizeOfType(spec.DataType),
-		DataType:  spec.DataType,
+		Size:      spec.Size * SizeOfType(effectiveType),
+		DataType:  effectiveType,
 		Alignment: spec.Alignment,
 		IsOutput:  true, // Temp arrays are writable
 	}
@@ -143,16 +148,6 @@ func (kr *Runner) allocateArrayFromSpec(spec *builder.ParamSpec) error {
 	return nil
 }
 
-// flatArrayToMatrix converts a flat array to a matrix using stride
-func (kr *Runner) flatArrayToMatrix(spec *builder.ParamSpec) mat.Matrix {
-	// This is a simplified version - real implementation would handle type conversion
-	if data, ok := spec.HostBinding.([]float64); ok {
-		return mat.NewDense(spec.MatrixRows, spec.MatrixCols, data)
-	}
-	// Handle other types...
-	return nil
-}
-
 // verifyExistingAllocation checks if existing allocation is compatible
 func (kr *Runner) verifyExistingAllocation(spec *builder.ParamSpec) error {
 	meta, exists := kr.arrayMetadata[spec.Name]
@@ -182,10 +177,12 @@ func (kr *Runner) verifyExistingAllocation(spec *builder.ParamSpec) error {
 		kr.hostBindings[spec.Name] = spec.HostBinding
 	}
 
+	// Store updated param spec
+	meta.paramSpec = spec
+	kr.arrayMetadata[spec.Name] = meta
+
 	return nil
 }
-
-// In kernel_definition.go, update matrix method calls:
 
 // addStaticMatrixFromSpec adds a static matrix from parameter specification
 func (kr *Runner) addStaticMatrixFromSpec(spec *builder.ParamSpec) error {
@@ -193,14 +190,28 @@ func (kr *Runner) addStaticMatrixFromSpec(spec *builder.ParamSpec) error {
 
 	if m, ok := spec.HostBinding.(mat.Matrix); ok {
 		matrix = m
-	} else if spec.HostBinding != nil && spec.Stride > 0 {
-		// Convert flat array to matrix
-		matrix = kr.flatArrayToMatrix(spec)
+	} else if data, ok := spec.HostBinding.([]float64); ok && spec.Stride > 0 {
+		// Create matrix from flat array using stride
+		matrix = mat.NewDense(len(data)/spec.Stride, spec.Stride, data)
 	} else {
-		return fmt.Errorf("static matrix %s needs valid binding", spec.Name)
+		return fmt.Errorf("invalid matrix binding for %s", spec.Name)
 	}
 
-	kr.addStaticMatrix(spec.Name, matrix) // Changed from AddStaticMatrix
+	kr.Builder.AddStaticMatrix(spec.Name, matrix)
+
+	// Store metadata
+	rows, cols := matrix.Dims()
+	meta := ArrayMetadata{
+		spec: builder.ArraySpec{
+			Name:     spec.Name,
+			DataType: spec.GetEffectiveType(),
+			Size:     int64(rows * cols * int(SizeOfType(spec.GetEffectiveType()))),
+		},
+		dataType:  spec.GetEffectiveType(),
+		paramSpec: spec,
+	}
+	kr.arrayMetadata[spec.Name] = meta
+
 	return nil
 }
 
@@ -210,24 +221,113 @@ func (kr *Runner) addDeviceMatrixFromSpec(spec *builder.ParamSpec) error {
 
 	if m, ok := spec.HostBinding.(mat.Matrix); ok {
 		matrix = m
-	} else if spec.HostBinding != nil && spec.Stride > 0 {
-		// Convert flat array to matrix
-		matrix = kr.flatArrayToMatrix(spec)
+	} else if data, ok := spec.HostBinding.([]float64); ok && spec.Stride > 0 {
+		// Create matrix from flat array using stride
+		matrix = mat.NewDense(len(data)/spec.Stride, spec.Stride, data)
 	} else {
-		// Create zero matrix if no binding
-		matrix = mat.NewDense(spec.MatrixRows, spec.MatrixCols, nil)
+		return fmt.Errorf("invalid matrix binding for %s", spec.Name)
 	}
 
-	// Add to device matrices collection
-	kr.addDeviceMatrix(spec.Name, matrix) // Changed from AddDeviceMatrix
+	kr.Builder.AddDeviceMatrix(spec.Name, matrix)
 
-	// Store binding if present
-	if spec.HostBinding != nil {
-		if kr.hostBindings == nil {
-			kr.hostBindings = make(map[string]interface{})
-		}
-		kr.hostBindings[spec.Name] = spec.HostBinding
+	// Store metadata
+	rows, cols := matrix.Dims()
+	meta := ArrayMetadata{
+		spec: builder.ArraySpec{
+			Name:     spec.Name,
+			DataType: spec.GetEffectiveType(),
+			Size:     int64(rows * cols * int(SizeOfType(spec.GetEffectiveType()))),
+		},
+		dataType:  spec.GetEffectiveType(),
+		paramSpec: spec,
 	}
+	kr.arrayMetadata[spec.Name] = meta
 
 	return nil
+}
+
+// GetKernelSignature generates the signature for a defined kernel
+// This now uses array-specific types instead of real_t
+func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
+	def, exists := kr.kernelDefinitions[kernelName]
+	if !exists {
+		return "", fmt.Errorf("kernel %s not defined", kernelName)
+	}
+
+	args := kr.GetKernelArgumentsForDefinition(def)
+	params := make([]string, 0, len(args))
+
+	for _, arg := range args {
+		if arg.Category == "scalar" {
+			// Scalars are passed by value
+			params = append(params, fmt.Sprintf("%s %s", arg.Type, arg.Name))
+		} else if arg.Category == "array_data" || arg.Category == "array_offset" {
+			// Find the parameter spec to get its type
+			var typeStr string
+			if arg.UserArgName != "" {
+				// Find the parameter that corresponds to this array
+				for _, p := range def.Parameters {
+					if p.Name == arg.UserArgName {
+						if arg.Category == "array_data" {
+							typeStr = kr.getParamTypeString(&p)
+						} else {
+							typeStr = "int_t" // offsets are always int_t
+						}
+						break
+					}
+				}
+			}
+
+			constStr := ""
+			if arg.IsConst {
+				constStr = "const "
+			}
+			params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
+		} else {
+			// System arrays (K) or matrices
+			constStr := ""
+			if arg.IsConst {
+				constStr = "const "
+			}
+
+			// For matrices, find their type from parameters
+			if arg.Category == "matrix" {
+				typeStr := "real_t" // default
+				for _, p := range def.Parameters {
+					if p.Name == arg.Name && p.IsMatrix {
+						typeStr = kr.getParamTypeString(&p)
+						break
+					}
+				}
+				params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
+			} else {
+				// System arrays use their defined type
+				params = append(params, fmt.Sprintf("%s%s* %s", constStr, arg.Type, arg.Name))
+			}
+		}
+	}
+
+	return strings.Join(params, ",\n\t"), nil
+}
+
+// getParamTypeString returns the C type string for a parameter based on its effective type
+func (kr *Runner) getParamTypeString(param *builder.ParamSpec) string {
+	effectiveType := param.GetEffectiveType()
+	return kr.dataTypeToCType(effectiveType)
+}
+
+// dataTypeToCType converts a builder.DataType to its C type string
+func (kr *Runner) dataTypeToCType(dt builder.DataType) string {
+	switch dt {
+	case builder.Float32:
+		return "float"
+	case builder.Float64:
+		return "double"
+	case builder.INT32:
+		return "int"
+	case builder.INT64:
+		return "long"
+	default:
+		return "double" // fallback
+	}
 }

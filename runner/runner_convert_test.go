@@ -16,8 +16,7 @@ func TestConvert_BasicFloat64ToFloat32(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{10},
-		FloatType: builder.Float32, // Device uses float32
+		K: []int{10},
 	})
 	defer kp.Free()
 
@@ -87,8 +86,7 @@ func _TestConvert_PartitionedData(t *testing.T) {
 
 	k := []int{5, 7, 6}
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64, // Device uses float64
+		K: k,
 	})
 	defer kp.Free()
 
@@ -178,8 +176,7 @@ func _TestConvert_AllCombinations(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			kp := NewRunner(device, builder.Config{
-				K:         []int{5},
-				FloatType: tc.deviceType,
+				K: []int{5},
 			})
 			defer kp.Free()
 
@@ -239,8 +236,7 @@ func TestConvert_MemoryEfficiency(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{1000},
-		FloatType: builder.Float32,
+		K: []int{1000},
 	})
 	defer kp.Free()
 
@@ -275,8 +271,7 @@ func TestConvert_Debug(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{5},        // Smaller for easier debugging
-		FloatType: builder.Float32, // Device uses float32
+		K: []int{5}, // Smaller for easier debugging
 	})
 	defer kp.Free()
 
@@ -390,8 +385,7 @@ func TestConvert_NoConversion(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{5},
-		FloatType: builder.Float32,
+		K: []int{5},
 	})
 	defer kp.Free()
 
@@ -452,8 +446,7 @@ func _TestConvert_PartitionedDataDebug(t *testing.T) {
 
 	k := []int{5, 7, 6}
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64, // Device uses float64
+		K: k,
 	})
 	defer kp.Free()
 

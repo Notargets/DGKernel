@@ -48,9 +48,8 @@ func TestDGKernel_Creation_SinglePartition(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{100},
-		FloatType: builder.Float64,
-		IntType:   builder.INT64,
+		K:       []int{100},
+		IntType: builder.INT64,
 	})
 	defer kp.Free()
 
@@ -106,13 +105,13 @@ func TestDGKernel_CodeGen_TypesAndConstants(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{5, 10, 7},
-		FloatType: builder.Float64,
-		IntType:   builder.INT64,
+		K:       []int{5, 10, 7},
+		IntType: builder.INT64,
 	})
 	defer kp.Free()
 
-	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
+	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays(),
+		kp.collectArrayTypes())
 
 	// Check type definitions
 	expectedTypes := []string{
@@ -153,7 +152,8 @@ func TestDGKernel_CodeGen_MatrixMacroStructure(t *testing.T) {
 	})
 	kp.AddStaticMatrix("Dr", Dr)
 
-	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
+	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays(),
+		kp.collectArrayTypes())
 
 	// Verify matrix declaration
 	if !strings.Contains(preamble, "const double Dr[3][3]") {
@@ -214,7 +214,7 @@ func TestDGKernel_NewAPI_BasicKernel(t *testing.T) {
 	%s
 ) {
     for (int part = 0; part < NPART; ++part; @outer) {
-       real_t* data = data_PART(part);
+       double* data = data_PART(part);
        
        for (int i = 0; i < KpartMax; ++i; @inner) {
           if (i < K[part]) {
@@ -254,8 +254,7 @@ func TestDGKernel_NewAPI_MatrixOperation(t *testing.T) {
 	totalNodes := 15 * np
 
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -514,7 +513,8 @@ func TestDGKernel_EdgeCases_DegeneratePartitions(t *testing.T) {
 			}
 
 			// Verify preamble contains correct value
-			preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
+			preamble := kp.GeneratePreamble(kp.GetAllocatedArrays(),
+				kp.collectArrayTypes())
 			expected := fmt.Sprintf("#define KpartMax %d", tc.expectedKMax)
 			if !strings.Contains(preamble, expected) {
 				t.Errorf("Preamble missing: %s", expected)

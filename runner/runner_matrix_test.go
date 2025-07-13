@@ -17,8 +17,7 @@ func TestRunner_MatrixOperations(t *testing.T) {
 	k := []int{2, 3} // 2 and 3 elements per partition
 
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -88,8 +87,7 @@ func TestRunner_DeviceMatrix(t *testing.T) {
 	k := []int{10}
 
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 

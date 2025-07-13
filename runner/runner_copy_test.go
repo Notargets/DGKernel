@@ -241,8 +241,7 @@ func TestRunner_PartitionCopy(t *testing.T) {
 
 	k := []int{3, 5, 7}
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -312,8 +311,7 @@ func TestRunner_TypeConversion(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{100},
-		FloatType: builder.Float32, // Device uses float32
+		K: []int{100},
 	})
 	defer kp.Free()
 

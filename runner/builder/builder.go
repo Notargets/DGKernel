@@ -1,3 +1,6 @@
+// File: runner/builder/builder.go
+// Complete replacement implementing Phases 2 and 4
+
 package builder
 
 import (
@@ -32,7 +35,7 @@ type ArraySpec struct {
 	Size      int64
 	Alignment AlignmentType
 	DataType  DataType
-	IsOutput  bool // NEW: Explicitly declare if this is an output array
+	IsOutput  bool
 }
 
 // Builder manages code generation and execution for partition-parallel Kernels
@@ -43,15 +46,15 @@ type Builder struct {
 	KpartMax      int // Maximum K value across all partitions
 
 	// Type configuration
-	FloatType DataType
-	IntType   DataType
+	// REMOVED: FloatType - each array determines its own type
+	IntType DataType
 
 	// Reference Elements
 
 	// Static data to embed
 	StaticMatrices map[string]mat.Matrix
 
-	// Device matrices to allocate in global memory (NEW)
+	// Device matrices to allocate in global memory
 	DeviceMatrices map[string]mat.Matrix
 
 	// Generated code
@@ -59,13 +62,14 @@ type Builder struct {
 }
 
 // Config holds configuration for creating a Builder
+// MODIFIED: Removed FloatType
 type Config struct {
-	K         []int
-	FloatType DataType
-	IntType   DataType
+	K       []int
+	IntType DataType
 }
 
 // NewBuilder creates a new Builder instance
+// MODIFIED: Removed FloatType handling
 func NewBuilder(cfg Config) *Builder {
 	if len(cfg.K) == 0 {
 		panic("K array cannot be empty")
@@ -78,10 +82,6 @@ func NewBuilder(cfg Config) *Builder {
 		}
 	}
 	// Set defaults
-	floatType := cfg.FloatType
-	if floatType == 0 {
-		floatType = Float64
-	}
 	intType := cfg.IntType
 	if intType == 0 {
 		intType = INT64
@@ -90,10 +90,9 @@ func NewBuilder(cfg Config) *Builder {
 		NumPartitions:  len(cfg.K),
 		K:              make([]int, len(cfg.K)),
 		KpartMax:       kpartMax,
-		FloatType:      floatType,
 		IntType:        intType,
 		StaticMatrices: make(map[string]mat.Matrix),
-		DeviceMatrices: make(map[string]mat.Matrix), // NEW: Initialize DeviceMatrices
+		DeviceMatrices: make(map[string]mat.Matrix),
 	}
 	// Copy K values
 	copy(kb.K, cfg.K)
@@ -105,14 +104,13 @@ func (kb *Builder) AddStaticMatrix(name string, m mat.Matrix) {
 	kb.StaticMatrices[name] = m
 }
 
-// AddDeviceMatrix adds a matrix to be allocated in device global memory (NEW)
+// AddDeviceMatrix adds a matrix to be allocated in device global memory
 func (kb *Builder) AddDeviceMatrix(name string, m mat.Matrix) {
 	kb.DeviceMatrices[name] = m
 }
 
 // CalculateAlignedOffsetsAndSize computes partition offsets with alignment
-func (kb *Builder) CalculateAlignedOffsetsAndSize(spec ArraySpec) (
-	[]int64, int64) {
+func (kb *Builder) CalculateAlignedOffsetsAndSize(spec ArraySpec) ([]int64, int64) {
 	offsets := make([]int64, kb.NumPartitions+1)
 	totalElements := kb.GetTotalElements()
 	bytesPerElement := spec.Size / int64(totalElements)
@@ -144,7 +142,6 @@ func (kb *Builder) CalculateAlignedOffsetsAndSize(spec ArraySpec) (
 		}
 
 		// Store offset in units of VALUES, not elements
-		// This makes pointer arithmetic work correctly: ptr + offset
 		offsets[i] = currentByteOffset / valueSize
 
 		// Advance by partition data size
@@ -158,7 +155,6 @@ func (kb *Builder) CalculateAlignedOffsetsAndSize(spec ArraySpec) (
 	}
 	offsets[kb.NumPartitions] = currentByteOffset / valueSize
 
-	// return offsets, currentByteOffset
 	return offsets, offsets[kb.NumPartitions] * valueSize
 }
 
@@ -172,46 +168,38 @@ func (kb *Builder) GetTotalElements() int {
 }
 
 // GeneratePreamble generates the kernel preamble with static data and utilities
-func (kb *Builder) GeneratePreamble(allocatedArrays []string) string {
+// MODIFIED: Now requires array type information
+func (kb *Builder) GeneratePreamble(allocatedArrays []string, arrayTypes map[string]DataType) string {
 	var sb strings.Builder
 
-	// 1. Type definitions and constants
+	// 1. Type definitions and constants (WITHOUT real_t)
 	sb.WriteString(kb.generateTypeDefinitions())
 
 	// 2. Static matrix declarations
-	sb.WriteString(kb.generateStaticMatrices())
+	sb.WriteString(kb.generateStaticMatrices(arrayTypes))
 
-	// 3. Partition access macros
-	sb.WriteString(kb.generatePartitionMacros(allocatedArrays))
+	// 3. Partition access macros with type information
+	sb.WriteString(kb.generatePartitionMacros(allocatedArrays, arrayTypes))
 
 	// 4. Matrix operation macros with @inner
-	sb.WriteString(kb.generateMatrixMacros())
+	sb.WriteString(kb.generateMatrixMacros(arrayTypes))
 
 	kb.KernelPreamble = sb.String()
 	return kb.KernelPreamble
 }
 
 // generateTypeDefinitions creates type definitions based on precision settings
+// MODIFIED: Removed real_t typedef
 func (kb *Builder) generateTypeDefinitions() string {
 	var sb strings.Builder
 
-	// Type definitions - use the consolidated TypeName function concept
-	floatTypeStr := "double"
-	floatSuffix := ""
-	if kb.FloatType == Float32 {
-		floatTypeStr = "float"
-		floatSuffix = "f"
-	}
-
+	// Only int_t typedef remains
 	intTypeStr := "long"
 	if kb.IntType == INT32 {
 		intTypeStr = "int"
 	}
 
-	sb.WriteString(fmt.Sprintf("typedef %s real_t;\n", floatTypeStr))
 	sb.WriteString(fmt.Sprintf("typedef %s int_t;\n", intTypeStr))
-	sb.WriteString(fmt.Sprintf("#define REAL_ZERO 0.0%s\n", floatSuffix))
-	sb.WriteString(fmt.Sprintf("#define REAL_ONE 1.0%s\n", floatSuffix))
 	sb.WriteString("\n")
 
 	// Constants
@@ -223,15 +211,21 @@ func (kb *Builder) generateTypeDefinitions() string {
 }
 
 // generateStaticMatrices converts matrices to static array initializations
-func (kb *Builder) generateStaticMatrices() string {
+// MODIFIED: Uses specific type for each matrix
+func (kb *Builder) generateStaticMatrices(arrayTypes map[string]DataType) string {
 	var sb strings.Builder
 
 	if len(kb.StaticMatrices) > 0 {
 		sb.WriteString("// Static matrices\n")
 		for name, matrix := range kb.StaticMatrices {
-			// Only generate if not also in DeviceMatrices (MODIFIED)
+			// Only generate if not also in DeviceMatrices
 			if _, isDevice := kb.DeviceMatrices[name]; !isDevice {
-				sb.WriteString(kb.formatStaticMatrix(name, matrix))
+				// Get type for this matrix
+				matrixType := Float64 // default
+				if t, exists := arrayTypes[name]; exists {
+					matrixType = t
+				}
+				sb.WriteString(kb.formatStaticMatrix(name, matrix, matrixType))
 			}
 		}
 		sb.WriteString("\n")
@@ -241,34 +235,29 @@ func (kb *Builder) generateStaticMatrices() string {
 }
 
 // formatStaticMatrix formats a single matrix as a static C array
-// IMPORTANT: This function transposes matrices during generation to convert from
-// Go's row-major format to the column-major format expected by numerical
-// libraries and GPU kernels.
-func (kb *Builder) formatStaticMatrix(name string, m mat.Matrix) string {
+// MODIFIED: Takes explicit type parameter
+func (kb *Builder) formatStaticMatrix(name string, m mat.Matrix, dataType DataType) string {
 	rows, cols := m.Dims()
 	var sb strings.Builder
 
 	typeStr := "double"
-	if kb.FloatType == Float32 {
+	suffix := ""
+	if dataType == Float32 {
 		typeStr = "float"
+		suffix = "f"
 	}
 
 	// COLUMN-MAJOR STORAGE: Static matrices are generated in column-major format
-	// for consistency with device matrices and numerical libraries.
-	//
-	// The matrix is declared with [cols][rows] to maintain column-major layout
-	// in C, where the first index varies fastest in memory.
 	sb.WriteString(fmt.Sprintf("const %s %s[%d][%d] = {\n",
 		typeStr, name, cols, rows))
 
 	// Generate column-major data
-	// Outer loop over columns, inner loop over rows
 	for j := 0; j < cols; j++ {
 		sb.WriteString("  {")
 		for i := 0; i < rows; i++ {
-			val := m.At(i, j) // Note: accessing in row,col but storing in col,row
-			if kb.FloatType == Float32 {
-				sb.WriteString(fmt.Sprintf("%.8ff", val))
+			val := m.At(i, j)
+			if dataType == Float32 {
+				sb.WriteString(fmt.Sprintf("%.8f%s", val, suffix))
 			} else {
 				sb.WriteString(fmt.Sprintf("%.16e", val))
 			}
@@ -288,15 +277,32 @@ func (kb *Builder) formatStaticMatrix(name string, m mat.Matrix) string {
 }
 
 // generatePartitionMacros creates macros for accessing partitioned data
-func (kb *Builder) generatePartitionMacros(allocatedArrays []string) string {
+// MODIFIED: Now casts to specific type for each array
+func (kb *Builder) generatePartitionMacros(allocatedArrays []string, arrayTypes map[string]DataType) string {
 	var sb strings.Builder
 
 	sb.WriteString("// Partition access macros\n")
 
-	// Generate macro for each allocated array
+	// Generate macro for each allocated array with proper type cast
 	for _, arrayName := range allocatedArrays {
-		sb.WriteString(fmt.Sprintf("#define %s_PART(part) (%s_global + %s_offsets[part])\n",
-			arrayName, arrayName, arrayName))
+		// Get the type for this array
+		arrayType := Float64 // default
+		if t, exists := arrayTypes[arrayName]; exists {
+			arrayType = t
+		}
+
+		typeStr := "double"
+		if arrayType == Float32 {
+			typeStr = "float"
+		} else if arrayType == INT32 {
+			typeStr = "int"
+		} else if arrayType == INT64 {
+			typeStr = "long"
+		}
+
+		// Cast to specific type instead of using real_t*
+		sb.WriteString(fmt.Sprintf("#define %s_PART(part) ((%s*)(%s_global + %s_offsets[part]))\n",
+			arrayName, typeStr, arrayName, arrayName))
 	}
 
 	sb.WriteString("\n")
@@ -304,118 +310,101 @@ func (kb *Builder) generatePartitionMacros(allocatedArrays []string) string {
 }
 
 // generateMatrixMacros generates MATMUL macros with @inner loops
-func (kb *Builder) generateMatrixMacros() string {
+// MODIFIED: Uses specific types for matrix operations
+func (kb *Builder) generateMatrixMacros(arrayTypes map[string]DataType) string {
 	var sb strings.Builder
 
 	// Generate macros for static matrices
 	for name, matrix := range kb.StaticMatrices {
-		// Skip if also in DeviceMatrices (will be handled as device matrix)
+		// Skip if also in DeviceMatrices
 		if _, isDevice := kb.DeviceMatrices[name]; !isDevice {
-			sb.WriteString(kb.generateStaticMatrixMacro(name, matrix))
+			matrixType := Float64 // default
+			if t, exists := arrayTypes[name]; exists {
+				matrixType = t
+			}
+			sb.WriteString(kb.generateStaticMatrixMacro(name, matrix, matrixType))
 		}
 	}
 
 	// Generate macros for device matrices
 	for name, matrix := range kb.DeviceMatrices {
-		sb.WriteString(kb.generateDeviceMatrixMacro(name, matrix))
+		matrixType := Float64 // default
+		if t, exists := arrayTypes[name]; exists {
+			matrixType = t
+		}
+		sb.WriteString(kb.generateDeviceMatrixMacro(name, matrix, matrixType))
 	}
 
 	return sb.String()
 }
 
-// generateStaticMatrixMacro creates a MATMUL macro for a static matrix
-func (kb *Builder) generateStaticMatrixMacro(name string, m mat.Matrix) string {
-	rows, cols := m.Dims()
-	var sb strings.Builder
-
-	// IMPORTANT: Static matrix is already in column-major format from formatStaticMatrix
-	sb.WriteString(fmt.Sprintf("// MATMUL macro for static matrix %s (column-major storage)\n", name))
-
-	// Matrix multiplication: OUT[i] = SUM_j(M[i,j] * IN[j])
-	// With column-major M: M[i,j] = M[j][i]
-	sb.WriteString(fmt.Sprintf("#define MATMUL_%s(IN, OUT, K_VAL) \\\n", name))
-	sb.WriteString("    do { \\\n")
-	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
-	sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
-	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
-	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
-	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
-	// Column-major access: [col][row] = [j][i]
-	sb.WriteString(fmt.Sprintf("                        sum += %s[j][i] * (IN)[elem * %d + j]; \\\n", name, cols))
-	sb.WriteString("                    } \\\n")
-	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] = sum; \\\n", rows))
-	sb.WriteString("                } \\\n")
-	sb.WriteString("            } \\\n")
-	sb.WriteString("        } \\\n")
-	sb.WriteString("    } while(0)\n\n")
-
-	// Generate MATMUL_ADD variant
-	sb.WriteString(fmt.Sprintf("#define MATMUL_ADD_%s(IN, OUT, K_VAL) \\\n", name))
-	sb.WriteString("    do { \\\n")
-	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
-	sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
-	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
-	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
-	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
-	sb.WriteString(fmt.Sprintf("                        sum += %s[j][i] * (IN)[elem * %d + j]; \\\n", name, cols))
-	sb.WriteString("                    } \\\n")
-	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] += sum; \\\n", rows))
-	sb.WriteString("                } \\\n")
-	sb.WriteString("            } \\\n")
-	sb.WriteString("        } \\\n")
-	sb.WriteString("    } while(0)\n\n")
-
-	return sb.String()
+// generateStaticMatrixMacro generates a MATMUL macro for a static matrix
+// MODIFIED: Uses specific type instead of real_t
+func (kb *Builder) generateStaticMatrixMacro(name string, matrix mat.Matrix, dataType DataType) string {
+	return kb.generateSingleMatrixMacro(name, matrix, true, dataType)
 }
 
-// generateDeviceMatrixMacro creates a MATMUL macro for a device matrix
-func (kb *Builder) generateDeviceMatrixMacro(name string, m mat.Matrix) string {
-	rows, cols := m.Dims()
-	var sb strings.Builder
-
-	// IMPORTANT: Device matrix pointer points to column-major data
-	sb.WriteString(fmt.Sprintf("// MATMUL macro for device matrix %s (column-major storage)\n", name))
-
-	// Device matrix macro references the matrix pointer by name directly
-	sb.WriteString(fmt.Sprintf("#define MATMUL_%s(IN, OUT, K_VAL) \\\n", name))
-	sb.WriteString("    do { \\\n")
-	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
-	sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
-	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
-	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
-	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
-	// Column-major access for device matrix: [j*rows + i]
-	sb.WriteString(fmt.Sprintf("                        sum += %s[j * %d + i] * (IN)[elem * %d + j]; \\\n", name, rows, cols))
-	sb.WriteString("                    } \\\n")
-	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] = sum; \\\n", rows))
-	sb.WriteString("                } \\\n")
-	sb.WriteString("            } \\\n")
-	sb.WriteString("        } \\\n")
-	sb.WriteString("    } while(0)\n\n")
-
-	// Similar for MATMUL_ADD...
-	sb.WriteString(fmt.Sprintf("#define MATMUL_ADD_%s(IN, OUT, K_VAL) \\\n", name))
-	sb.WriteString("    do { \\\n")
-	sb.WriteString(fmt.Sprintf("        for (int i = 0; i < %d; ++i) { \\\n", rows))
-	sb.WriteString("            for (int elem = 0; elem < KpartMax; ++elem; @inner) { \\\n")
-	sb.WriteString("                if (elem < (K_VAL)) { \\\n")
-	sb.WriteString("                    real_t sum = REAL_ZERO; \\\n")
-	sb.WriteString(fmt.Sprintf("                    for (int j = 0; j < %d; ++j) { \\\n", cols))
-	sb.WriteString(fmt.Sprintf("                        sum += %s[j * %d + i] * (IN)[elem * %d + j]; \\\n", name, rows, cols))
-	sb.WriteString("                    } \\\n")
-	sb.WriteString(fmt.Sprintf("                    (OUT)[elem * %d + i] += sum; \\\n", rows))
-	sb.WriteString("                } \\\n")
-	sb.WriteString("            } \\\n")
-	sb.WriteString("        } \\\n")
-	sb.WriteString("    } while(0)\n\n")
-
-	return sb.String()
+// generateDeviceMatrixMacro generates a MATMUL macro for a device matrix
+// MODIFIED: Uses specific type instead of real_t
+func (kb *Builder) generateDeviceMatrixMacro(name string, matrix mat.Matrix, dataType DataType) string {
+	return kb.generateSingleMatrixMacro(name, matrix, false, dataType)
 }
 
-// GetIntSize returns the size of the integer type in bytes
-func (kb *Builder) GetIntSize() int {
-	if kb.IntType == INT32 {
-		return 4
+// generateSingleMatrixMacro generates both MATMUL and MATMUL_ADD macros
+// MODIFIED: Uses specific type for accumulator and zero constant
+func (kb *Builder) generateSingleMatrixMacro(name string, matrix mat.Matrix, isStatic bool, dataType DataType) string {
+	rows, cols := matrix.Dims()
+	var sb strings.Builder
+
+	// Determine type and zero constant
+	typeStr := "double"
+	zeroStr := "0.0"
+	if dataType == Float32 {
+		typeStr = "float"
+		zeroStr = "0.0f"
 	}
-	return 8
+
+	// Standard multiply macro: OUT = Matrix × IN
+	sb.WriteString(fmt.Sprintf("#define MATMUL_%s(IN, OUT, K_VAL) {\\\n", name))
+	sb.WriteString(fmt.Sprintf("  for (int ii = 0; ii < %d; ++ii) {\\\n", rows))
+	sb.WriteString("    for (int elem = 0; elem < KpartMax; ++elem; @inner) {\\\n")
+	sb.WriteString("      if (elem < (K_VAL)) {\\\n")
+	sb.WriteString(fmt.Sprintf("        %s sum = %s;\\\n", typeStr, zeroStr))
+	sb.WriteString(fmt.Sprintf("        for (int jj = 0; jj < %d; ++jj) {\\\n", cols))
+
+	if isStatic {
+		sb.WriteString(fmt.Sprintf("          sum += %s[jj][ii] * (IN)[elem * %d + jj];\\\n", name, cols))
+	} else {
+		sb.WriteString(fmt.Sprintf("          sum += %s[jj * %d + ii] * (IN)[elem * %d + jj];\\\n", name, rows, cols))
+	}
+
+	sb.WriteString("        }\\\n")
+	sb.WriteString(fmt.Sprintf("        (OUT)[elem * %d + ii] = sum;\\\n", rows))
+	sb.WriteString("      }\\\n")
+	sb.WriteString("    }\\\n")
+	sb.WriteString("  }\\\n")
+	sb.WriteString("}\n\n")
+
+	// Accumulating multiply macro: OUT += Matrix × IN
+	sb.WriteString(fmt.Sprintf("#define MATMUL_ADD_%s(IN, OUT, K_VAL) {\\\n", name))
+	sb.WriteString(fmt.Sprintf("  for (int ii = 0; ii < %d; ++ii) {\\\n", rows))
+	sb.WriteString("    for (int elem = 0; elem < KpartMax; ++elem; @inner) {\\\n")
+	sb.WriteString("      if (elem < (K_VAL)) {\\\n")
+	sb.WriteString(fmt.Sprintf("        %s sum = %s;\\\n", typeStr, zeroStr))
+	sb.WriteString(fmt.Sprintf("        for (int jj = 0; jj < %d; ++jj) {\\\n", cols))
+
+	if isStatic {
+		sb.WriteString(fmt.Sprintf("          sum += %s[jj][ii] * (IN)[elem * %d + jj];\\\n", name, cols))
+	} else {
+		sb.WriteString(fmt.Sprintf("          sum += %s[jj * %d + ii] * (IN)[elem * %d + jj];\\\n", name, rows, cols))
+	}
+
+	sb.WriteString("        }\\\n")
+	sb.WriteString(fmt.Sprintf("        (OUT)[elem * %d + ii] += sum;\\\n", rows))
+	sb.WriteString("      }\\\n")
+	sb.WriteString("    }\\\n")
+	sb.WriteString("  }\\\n")
+	sb.WriteString("}\n\n")
+
+	return sb.String()
 }

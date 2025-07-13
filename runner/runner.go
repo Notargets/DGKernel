@@ -5,7 +5,6 @@ import (
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
 	"gonum.org/v1/gonum/mat"
-	"strings"
 	"unsafe"
 )
 
@@ -91,33 +90,6 @@ func (kr *Runner) performPostKernelCopies(def *KernelDefinition) error {
 	return nil
 }
 
-// GetKernelSignature generates the signature for a defined kernel
-func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
-	def, exists := kr.kernelDefinitions[kernelName]
-	if !exists {
-		return "", fmt.Errorf("kernel %s not defined", kernelName)
-	}
-
-	args := kr.GetKernelArgumentsForDefinition(def)
-	params := make([]string, 0, len(args))
-
-	for _, karg := range args {
-		if karg.Category == "scalar" {
-			// Scalars have explicit const in the type
-			params = append(params, fmt.Sprintf("const %s %s", karg.Type, karg.Name))
-		} else {
-			// Arrays and matrices
-			constStr := ""
-			if karg.IsConst {
-				constStr = "const "
-			}
-			params = append(params, fmt.Sprintf("%s%s %s", constStr, karg.Type, karg.Name))
-		}
-	}
-
-	return strings.Join(params, ",\n\t"), nil
-}
-
 // AddStaticMatrix adds a matrix that will be embedded as static const in kernels
 func (kr *Runner) AddStaticMatrix(name string, m mat.Matrix) {
 	kr.Builder.AddStaticMatrix(name, m)
@@ -126,44 +98,6 @@ func (kr *Runner) AddStaticMatrix(name string, m mat.Matrix) {
 // AddDeviceMatrix adds a matrix that will be allocated in device global memory
 func (kr *Runner) AddDeviceMatrix(name string, m mat.Matrix) {
 	kr.Builder.AddDeviceMatrix(name, m)
-}
-
-// AllocateDeviceMatrices allocates all device matrices that were added
-func (kr *Runner) AllocateDeviceMatrices() error {
-	// Allocate each device matrix
-	for name, matrix := range kr.DeviceMatrices {
-		if _, exists := kr.PooledMemory[name]; exists {
-			continue // Already allocated
-		}
-
-		rows, cols := matrix.Dims()
-		totalElements := rows * cols
-
-		var mem *gocca.OCCAMemory
-		if kr.FloatType == builder.Float64 {
-			// Copy and transpose for column-major storage
-			transposed := make([]float64, totalElements)
-			for i := 0; i < rows; i++ {
-				for j := 0; j < cols; j++ {
-					transposed[j*rows+i] = matrix.At(i, j)
-				}
-			}
-			mem = kr.Device.Malloc(int64(totalElements*8), unsafe.Pointer(&transposed[0]), nil)
-		} else {
-			// Convert to float32 and transpose
-			transposed := make([]float32, totalElements)
-			for i := 0; i < rows; i++ {
-				for j := 0; j < cols; j++ {
-					transposed[j*rows+i] = float32(matrix.At(i, j))
-				}
-			}
-			mem = kr.Device.Malloc(int64(totalElements*4), unsafe.Pointer(&transposed[0]), nil)
-		}
-
-		kr.PooledMemory[name] = mem
-	}
-
-	return nil
 }
 
 // GetAllocatedArrays returns a sorted list of allocated array names
@@ -198,15 +132,6 @@ func (kr *Runner) GetArrayMetadata(arrayName string) (ArrayMetadata, bool) {
 	return meta, exists
 }
 
-// GetArrayType returns the data type of an allocated array
-func (kr *Runner) GetArrayType(name string) (builder.DataType, error) {
-	metadata, exists := kr.arrayMetadata[name]
-	if !exists {
-		return 0, fmt.Errorf("array %s not found", name)
-	}
-	return metadata.dataType, nil
-}
-
 // GetArrayLogicalSize returns the number of logical elements in an array
 func (kr *Runner) GetArrayLogicalSize(name string) (int, error) {
 	metadata, exists := kr.arrayMetadata[name]
@@ -225,40 +150,6 @@ func (kr *Runner) GetIntSize() int {
 		return 4
 	}
 	return 8
-}
-
-// BuildKernel compiles and registers a kernel with the program
-func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
-	kr.GeneratePreamble(kr.GetAllocatedArrays())
-
-	// Combine preamble with kernel source
-	fullSource := kr.KernelPreamble + "\n" + kernelSource
-
-	// Build kernel with OpenMP optimization fix
-	var kernel *gocca.OCCAKernel
-	var err error
-
-	if kr.Device.Mode() == "OpenMP" {
-		// Workaround for OCCA bug: OpenMP doesn't get default -O3 flag
-		props := gocca.JsonParse(`{"compiler_flags": "-O3"}`)
-		defer props.Free()
-		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, props)
-	} else {
-		// Other devices work correctly with default flags
-		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, nil)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to build kernel %s: %w", kernelName, err)
-	}
-
-	// Register kernel
-	if kernel != nil {
-		kr.Kernels[kernelName] = kernel
-		return kernel, nil
-	}
-
-	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
 }
 
 // Free releases all resources
@@ -492,4 +383,147 @@ func (kr *Runner) buildKernelArguments(def *KernelDefinition, scalarValues []int
 	}
 
 	return args, nil
+}
+
+func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
+	// NEW: Collect array types for preamble generation
+	arrayTypes := kr.collectArrayTypes()
+
+	// MODIFIED: Pass array types to GeneratePreamble
+	kr.Builder.GeneratePreamble(kr.GetAllocatedArrays(), arrayTypes)
+
+	// Combine preamble with kernel source
+	fullSource := kr.KernelPreamble + "\n" + kernelSource
+
+	// Build kernel with OpenMP optimization fix
+	var kernel *gocca.OCCAKernel
+	var err error
+
+	if kr.Device.Mode() == "OpenMP" {
+		// Workaround for OCCA bug: OpenMP doesn't get default -O3 flag
+		props := gocca.JsonParse(`{"compiler_flags": "-O3"}`)
+		defer props.Free()
+		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, props)
+	} else {
+		// Other devices work correctly with default flags
+		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, nil)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to build kernel %s: %w", kernelName, err)
+	}
+
+	// Register kernel
+	if kernel != nil {
+		kr.Kernels[kernelName] = kernel
+		return kernel, nil
+	}
+
+	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
+}
+
+// generatePreambleWithTypes is a helper method for testing/debugging
+// NEW method to support Phase 2
+func (kr *Runner) generatePreambleWithTypes() string {
+	arrayTypes := kr.collectArrayTypes()
+	return kr.Builder.GeneratePreamble(kr.GetAllocatedArrays(), arrayTypes)
+}
+
+// GetArrayType returns the data type of an allocated array
+// Existing method - no changes needed
+func (kr *Runner) GetArrayType(name string) (builder.DataType, error) {
+	metadata, exists := kr.arrayMetadata[name]
+	if !exists {
+		return 0, fmt.Errorf("array %s not found", name)
+	}
+	return metadata.dataType, nil
+}
+
+// File: runner/runner.go
+// Update to AllocateDeviceMatrices method
+
+// AllocateDeviceMatrices allocates all device matrices that were added
+// MODIFIED: Gets type from array metadata instead of using kr.FloatType
+func (kr *Runner) AllocateDeviceMatrices() error {
+	// Allocate each device matrix
+	for name, matrix := range kr.DeviceMatrices {
+		if _, exists := kr.PooledMemory[name]; exists {
+			continue // Already allocated
+		}
+
+		rows, cols := matrix.Dims()
+		totalElements := rows * cols
+
+		// Get the type for this matrix from metadata
+		// Default to Float64 if not specified
+		matrixType := builder.Float64
+		if meta, exists := kr.arrayMetadata[name]; exists {
+			matrixType = meta.dataType
+		}
+
+		var mem *gocca.OCCAMemory
+		if matrixType == builder.Float64 {
+			// Copy and transpose for column-major storage
+			transposed := make([]float64, totalElements)
+			for i := 0; i < rows; i++ {
+				for j := 0; j < cols; j++ {
+					transposed[j*rows+i] = matrix.At(i, j)
+				}
+			}
+			mem = kr.Device.Malloc(int64(totalElements*8), unsafe.Pointer(&transposed[0]), nil)
+		} else {
+			// Convert to float32 and transpose
+			transposed := make([]float32, totalElements)
+			for i := 0; i < rows; i++ {
+				for j := 0; j < cols; j++ {
+					transposed[j*rows+i] = float32(matrix.At(i, j))
+				}
+			}
+			mem = kr.Device.Malloc(int64(totalElements*4), unsafe.Pointer(&transposed[0]), nil)
+		}
+
+		kr.PooledMemory[name] = mem
+	}
+
+	return nil
+}
+
+// File: runner/runner.go
+// Fix collectArrayTypes method to remove FloatType references
+
+// collectArrayTypes creates a map of array names to their effective data types
+// MODIFIED: Defaults to Float64 instead of kr.FloatType
+func (kr *Runner) collectArrayTypes() map[string]builder.DataType {
+	arrayTypes := make(map[string]builder.DataType)
+
+	// Collect types from arrayMetadata
+	for name, meta := range kr.arrayMetadata {
+		arrayTypes[name] = meta.dataType
+	}
+
+	// Collect types from static matrices
+	for name := range kr.StaticMatrices {
+		// Check if there's metadata with a specific type
+		if meta, exists := kr.arrayMetadata[name]; exists {
+			arrayTypes[name] = meta.dataType
+		} else {
+			// Default to Float64 for static matrices without metadata
+			// This is the sensible default since gonum matrices are float64
+			arrayTypes[name] = builder.Float64
+		}
+	}
+
+	// Collect types from device matrices
+	for name := range kr.DeviceMatrices {
+		// Check if there's metadata with a specific type
+		if meta, exists := kr.arrayMetadata[name]; exists {
+			arrayTypes[name] = meta.dataType
+		} else {
+			// Default to Float64 for device matrices without metadata
+			// This is the sensible default since gonum matrices are float64
+			arrayTypes[name] = builder.Float64
+		}
+	}
+
+	return arrayTypes
 }

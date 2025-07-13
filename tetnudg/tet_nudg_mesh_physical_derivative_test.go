@@ -28,8 +28,7 @@ func TestTetNudgMatCopy(t *testing.T) {
 
 	k := []int{Ktot}
 	kp := runner.NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -128,8 +127,7 @@ func TestTetNudgArrayReturn(t *testing.T) {
 		U, Rx, Dx := arrays[0], arrays[1], arrays[2]
 
 		kp := runner.NewRunner(device, builder.Config{
-			K:         []int{Ktot},
-			FloatType: builder.Float64,
+			K: []int{Ktot},
 		})
 		defer kp.Free()
 
@@ -207,8 +205,7 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 
 	k := []int{Ktot}
 	kp := runner.NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -322,8 +319,7 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 
 	k := []int{Ktot}
 	kp := runner.NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -470,8 +466,7 @@ func CalculatePhysicalDerivative(t *testing.T, device *gocca.OCCADevice,
 	}
 
 	kp := runner.NewRunner(device, builder.Config{
-		K:         splits,
-		FloatType: builder.Float64,
+		K: splits,
 	})
 	defer kp.Free()
 
@@ -598,8 +593,7 @@ func CalculatePhysicalDerivative32(t *testing.T, device *gocca.OCCADevice,
 	}
 
 	kp := runner.NewRunner(device, builder.Config{
-		K:         splits,
-		FloatType: builder.Float64,
+		K: splits,
 	})
 	defer kp.Free()
 

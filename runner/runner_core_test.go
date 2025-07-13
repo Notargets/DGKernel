@@ -43,9 +43,8 @@ func TestRunner_SinglePartition(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{100},
-		FloatType: builder.Float64,
-		IntType:   builder.INT64,
+		K:       []int{100},
+		IntType: builder.INT64,
 	})
 	defer kp.Free()
 
@@ -162,8 +161,7 @@ func TestRunner_MultiplePartitions(t *testing.T) {
 	totalElements := 23
 
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -259,8 +257,7 @@ func TestRunner_TypeMismatch(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{10},
-		FloatType: builder.Float64,
+		K: []int{10},
 	})
 	defer kp.Free()
 

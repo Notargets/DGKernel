@@ -17,8 +17,7 @@ func TestScalarMinimal(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{1},
-		FloatType: builder.Float64,
+		K: []int{1},
 	})
 	defer kp.Free()
 
@@ -91,8 +90,7 @@ func TestScalarMinimal(t *testing.T) {
 	t.Run("CompareBackends", func(t *testing.T) {
 		testScalarOnDevice := func(dev *gocca.OCCADevice, mode string) (float64, error) {
 			runner := NewRunner(dev, builder.Config{
-				K:         []int{1},
-				FloatType: builder.Float64,
+				K: []int{1},
 			})
 			defer runner.Free()
 
@@ -165,8 +163,7 @@ func TestCudaScalarDebug(t *testing.T) {
 	}
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{1},
-		FloatType: builder.Float64,
+		K: []int{1},
 	})
 	defer kp.Free()
 
@@ -323,8 +320,7 @@ func TestTraceAllocatedArrays(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{1},
-		FloatType: builder.Float64,
+		K: []int{1},
 	})
 	defer kp.Free()
 
@@ -359,7 +355,8 @@ func TestTraceAllocatedArrays(t *testing.T) {
 	}
 
 	// Step 5: Generate preamble and check for macros
-	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
+	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays(),
+		kp.collectArrayTypes())
 	t.Log("Generated preamble:")
 
 	// Check for partition macros
@@ -403,8 +400,7 @@ func TestSimplestCudaScalar(t *testing.T) {
 	}
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{1},
-		FloatType: builder.Float64,
+		K: []int{1},
 	})
 	defer kp.Free()
 
@@ -427,7 +423,7 @@ func TestSimplestCudaScalar(t *testing.T) {
 	t.Logf("AllocatedArrays: %v", kp.GetAllocatedArrays())
 
 	// Generate and print preamble
-	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays())
+	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays(), kp.collectArrayTypes())
 
 	// Extract just the partition macros section
 	lines := strings.Split(preamble, "\n")

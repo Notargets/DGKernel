@@ -34,8 +34,7 @@ func benchmarkMatrixOps(b *testing.B, k []int, np int) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -155,8 +154,7 @@ func BenchmarkRunner_TypeConversion(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Size_%d", size), func(b *testing.B) {
 			kp := NewRunner(device, builder.Config{
-				K:         []int{size},
-				FloatType: builder.Float32, // Device uses float32
+				K: []int{size},
 			})
 			defer kp.Free()
 
@@ -210,8 +208,7 @@ func BenchmarkRunner_MemoryPatterns(b *testing.B) {
 	k := []int{100, 100, 100, 100} // 4 partitions
 
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 
@@ -261,8 +258,7 @@ func BenchmarkRunner_MemoryPatterns2(b *testing.B) {
 	k := []int{100, 100, 100, 100} // 4 partitions
 
 	kp := NewRunner(device, builder.Config{
-		K:         k,
-		FloatType: builder.Float64,
+		K: k,
 	})
 	defer kp.Free()
 

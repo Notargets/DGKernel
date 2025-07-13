@@ -16,8 +16,7 @@ func TestSimpleScalarKernel(t *testing.T) {
 
 	// Setup runner
 	kp := NewRunner(device, builder.Config{
-		K:         []int{1},
-		FloatType: builder.Float64,
+		K: []int{1},
 	})
 	defer kp.Free()
 
@@ -82,8 +81,7 @@ func TestParameterAPI_BasicUsage(t *testing.T) {
 	// Setup runner
 	kp := NewRunner(device, builder.Config{
 		// K:         []int{10, 15},
-		K:         []int{25},
-		FloatType: builder.Float64,
+		K: []int{25},
 	})
 	defer kp.Free()
 
@@ -168,8 +166,7 @@ func TestParameterAPI_MatrixSupport(t *testing.T) {
 
 	np := 4
 	kp := NewRunner(device, builder.Config{
-		K:         []int{5},
-		FloatType: builder.Float64,
+		K: []int{5},
 	})
 	defer kp.Free()
 
@@ -239,8 +236,7 @@ func TestParameterAPI_TypeConversion(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{10},
-		FloatType: builder.Float32, // Device uses float32
+		K: []int{10},
 	})
 	defer kp.Free()
 
@@ -270,8 +266,7 @@ func TestParameterAPI_InOut(t *testing.T) {
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K:         []int{10},
-		FloatType: builder.Float64,
+		K: []int{10},
 	})
 	defer kp.Free()
 

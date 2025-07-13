@@ -9,73 +9,6 @@ import (
 	"unsafe"
 )
 
-// ============================================================================
-// Main Entry Points
-// ============================================================================
-
-// copyToDeviceWithConversion handles host→device copy with optional type conversion
-func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
-	mem := kr.GetMemory(spec.Name)
-	if mem == nil {
-		return fmt.Errorf("memory for %s not found", spec.Name)
-	}
-
-	// Handle partitioned data
-	if spec.IsPartitioned {
-		return kr.copyPartitionedData(spec, mem)
-	}
-
-	// Handle type conversion if needed
-	if spec.ConvertType != 0 && spec.ConvertType != spec.DataType {
-		// Perform conversion during copy
-		return kr.copyWithTypeConversion(spec.HostBinding, mem, spec.DataType, spec.ConvertType)
-	}
-
-	// Direct copy based on type
-	return kr.copyDirectToDevice(spec.HostBinding, mem)
-}
-
-// copyFromDeviceWithConversion handles device→host copy with optional type conversion
-func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
-	mem := kr.GetMemory(spec.Name)
-	if mem == nil {
-		return fmt.Errorf("memory for %s not found", spec.Name)
-	}
-
-	// Handle partitioned data
-	if spec.IsPartitioned {
-		return kr.copyPartitionedDataFromDevice(spec, mem)
-	}
-
-	// Get host binding
-	hostBinding := spec.HostBinding
-	if hostBinding == nil {
-		if binding, exists := kr.hostBindings[spec.Name]; exists {
-			hostBinding = binding
-		} else {
-			return fmt.Errorf("no host binding for %s", spec.Name)
-		}
-	}
-
-	// FIX: Use GetEffectiveType() to get what's actually on device
-	effectiveType := spec.GetEffectiveType()
-	totalSize := spec.Size * SizeOfType(effectiveType)
-
-	// Handle type conversion if needed
-	if spec.ConvertType != 0 && spec.ConvertType != spec.DataType {
-		// Perform conversion during copy back
-		// FIX: Pass effectiveType as source type (what's on device)
-		return kr.copyFromDeviceWithTypeConversion(mem, hostBinding, effectiveType, spec.DataType, totalSize)
-	}
-
-	// Direct copy from device
-	return kr.copyDirectFromDevice(hostBinding, mem, totalSize)
-}
-
-// ============================================================================
-// Partitioned Data Handling
-// ============================================================================
-
 // copyPartitionedData handles partitioned data copy with optional type conversion
 func (kr *Runner) copyPartitionedData(spec *builder.ParamSpec, deviceMem *gocca.OCCAMemory) error {
 	offsets, err := kr.readPartitionOffsets(spec.Name)
@@ -156,108 +89,6 @@ func (kr *Runner) readPartitionOffsets(name string) ([]int64, error) {
 	}
 
 	return nil, fmt.Errorf("no host offsets found for %s", name)
-}
-
-// copyDirectToDevice performs direct copy to device without conversion
-func (kr *Runner) copyDirectToDevice(hostData interface{}, mem *gocca.OCCAMemory) error {
-	switch data := hostData.(type) {
-	case []float64:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-	case []float32:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
-	case []int32:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
-	case []int64:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-	case mat.Matrix:
-		return kr.copyMatrixToDevice(data, mem)
-	default:
-		return fmt.Errorf("unsupported type for direct copy: %T", data)
-	}
-	return nil
-}
-
-// copyDirectFromDevice performs direct copy from device without conversion
-func (kr *Runner) copyDirectFromDevice(hostData interface{}, mem *gocca.OCCAMemory, size int64) error {
-	switch data := hostData.(type) {
-	case []float64:
-		mem.CopyTo(unsafe.Pointer(&data[0]), size)
-	case []float32:
-		mem.CopyTo(unsafe.Pointer(&data[0]), size)
-	case []int32:
-		mem.CopyTo(unsafe.Pointer(&data[0]), size)
-	case []int64:
-		mem.CopyTo(unsafe.Pointer(&data[0]), size)
-	case mat.Matrix:
-		return kr.copyMatrixFromDevice(data, mem)
-	default:
-		return fmt.Errorf("unsupported type for direct copy from device: %T", data)
-	}
-	return nil
-}
-
-// copyMatrixToDevice copies a matrix to device with transposition
-func (kr *Runner) copyMatrixToDevice(matrix mat.Matrix, mem *gocca.OCCAMemory) error {
-	rows, cols := matrix.Dims()
-	totalElements := rows * cols
-
-	if kr.FloatType == builder.Float64 {
-		// Transpose to column-major
-		transposed := make([]float64, totalElements)
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				transposed[j*rows+i] = matrix.At(i, j)
-			}
-		}
-		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
-	} else {
-		// Convert and transpose
-		transposed := make([]float32, totalElements)
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				transposed[j*rows+i] = float32(matrix.At(i, j))
-			}
-		}
-		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*4))
-	}
-	return nil
-}
-
-// copyMatrixFromDevice copies a matrix from device with transposition
-func (kr *Runner) copyMatrixFromDevice(matrix mat.Matrix, mem *gocca.OCCAMemory) error {
-	// Type assert to get mutable matrix
-	m, ok := matrix.(*mat.Dense)
-	if !ok {
-		return fmt.Errorf("matrix must be *mat.Dense for copy back")
-	}
-
-	rows, cols := m.Dims()
-	totalElements := rows * cols
-
-	if kr.FloatType == builder.Float64 {
-		// Read column-major data
-		transposed := make([]float64, totalElements)
-		mem.CopyTo(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
-
-		// Transpose back to row-major
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				m.Set(i, j, transposed[j*rows+i])
-			}
-		}
-	} else {
-		// Read and convert
-		transposed := make([]float32, totalElements)
-		mem.CopyTo(unsafe.Pointer(&transposed[0]), int64(totalElements*4))
-
-		// Transpose and convert back
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				m.Set(i, j, float64(transposed[j*rows+i]))
-			}
-		}
-	}
-	return nil
 }
 
 // flattenMatrix converts a matrix to a flat array in column-major order
@@ -703,4 +534,189 @@ func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *g
 
 	fmt.Printf("=== END copyMatrixPartitionsFromDevice DEBUG ===\n\n")
 	return nil
+}
+
+// copyMatrixToDevice copies a matrix to device with transposition
+// MODIFIED: Now takes explicit dataType parameter
+func (kr *Runner) copyMatrixToDevice(matrix mat.Matrix, mem *gocca.OCCAMemory, dataType builder.DataType) error {
+	rows, cols := matrix.Dims()
+	totalElements := rows * cols
+
+	if dataType == builder.Float64 {
+		// Transpose to column-major
+		transposed := make([]float64, totalElements)
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				transposed[j*rows+i] = matrix.At(i, j)
+			}
+		}
+		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
+	} else {
+		// Convert and transpose
+		transposed := make([]float32, totalElements)
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				transposed[j*rows+i] = float32(matrix.At(i, j))
+			}
+		}
+		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*4))
+	}
+	return nil
+}
+
+// copyMatrixFromDevice copies a matrix from device with transposition
+// MODIFIED: Now takes explicit dataType parameter
+func (kr *Runner) copyMatrixFromDevice(matrix mat.Matrix, mem *gocca.OCCAMemory, dataType builder.DataType) error {
+	// Type assert to get mutable matrix
+	m, ok := matrix.(*mat.Dense)
+	if !ok {
+		return fmt.Errorf("matrix must be *mat.Dense for copy back")
+	}
+
+	rows, cols := m.Dims()
+	totalElements := rows * cols
+
+	if dataType == builder.Float64 {
+		// Read column-major data
+		transposed := make([]float64, totalElements)
+		mem.CopyTo(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
+
+		// Transpose back to row-major
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				m.Set(i, j, transposed[j*rows+i])
+			}
+		}
+	} else {
+		// Read and convert
+		transposed := make([]float32, totalElements)
+		mem.CopyTo(unsafe.Pointer(&transposed[0]), int64(totalElements*4))
+
+		// Transpose and convert back
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				m.Set(i, j, float64(transposed[j*rows+i]))
+			}
+		}
+	}
+	return nil
+}
+
+// copyDirectToDevice performs direct copy to device without conversion
+// MODIFIED: Updated to handle matrices with type parameter
+func (kr *Runner) copyDirectToDevice(hostData interface{}, mem *gocca.OCCAMemory) error {
+	switch data := hostData.(type) {
+	case []float64:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+	case []float32:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
+	case []int32:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
+	case []int64:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+	case mat.Matrix:
+		// Need to determine the matrix type from metadata
+		// This will be called from copyToDeviceWithConversion which has the type info
+		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixToDevice directly")
+	default:
+		return fmt.Errorf("unsupported type for direct copy: %T", data)
+	}
+	return nil
+}
+
+// copyDirectFromDevice performs direct copy from device without conversion
+// MODIFIED: Updated to handle matrices with type parameter
+func (kr *Runner) copyDirectFromDevice(hostData interface{}, mem *gocca.OCCAMemory, size int64) error {
+	switch data := hostData.(type) {
+	case []float64:
+		mem.CopyTo(unsafe.Pointer(&data[0]), size)
+	case []float32:
+		mem.CopyTo(unsafe.Pointer(&data[0]), size)
+	case []int32:
+		mem.CopyTo(unsafe.Pointer(&data[0]), size)
+	case []int64:
+		mem.CopyTo(unsafe.Pointer(&data[0]), size)
+	case mat.Matrix:
+		// Need to determine the matrix type from metadata
+		// This will be called from copyFromDeviceWithConversion which has the type info
+		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixFromDevice directly")
+	default:
+		return fmt.Errorf("unsupported type for direct copy from device: %T", data)
+	}
+	return nil
+}
+
+// File: runner/kernel_copy.go
+// Updates to copy conversion methods to use ParamSpec types
+
+// copyToDeviceWithConversion handles host→device transfers with optional type conversion
+// MODIFIED: Now uses ParamSpec to determine types
+func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
+	if spec.HostBinding == nil {
+		return nil // Nothing to copy
+	}
+
+	mem := kr.GetMemory(spec.Name)
+	if mem == nil {
+		return fmt.Errorf("no device memory allocated for %s", spec.Name)
+	}
+
+	// Handle matrix types specially
+	if matrix, ok := spec.HostBinding.(mat.Matrix); ok {
+		return kr.copyMatrixToDevice(matrix, mem, spec.GetEffectiveType())
+	}
+
+	// For non-matrix types
+	hostType := spec.DataType
+	deviceType := spec.GetEffectiveType()
+
+	if hostType == deviceType {
+		// No conversion needed
+		return kr.copyDirectToDevice(spec.HostBinding, mem)
+	}
+
+	// Type conversion needed
+	return kr.copyWithTypeConversion(spec.HostBinding, mem, hostType, deviceType)
+}
+
+// copyFromDeviceWithConversion handles device→host transfers with optional type conversion
+// MODIFIED: Now uses ParamSpec to determine types
+func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
+	if spec.HostBinding == nil {
+		return nil // No destination
+	}
+
+	mem := kr.GetMemory(spec.Name)
+	if mem == nil {
+		return fmt.Errorf("no device memory allocated for %s", spec.Name)
+	}
+
+	// Handle matrix types specially
+	if matrix, ok := spec.HostBinding.(mat.Matrix); ok {
+		return kr.copyMatrixFromDevice(matrix, mem, spec.GetEffectiveType())
+	}
+
+	// Determine types
+	hostType := spec.DataType
+	deviceType := spec.GetEffectiveType()
+
+	// Calculate size based on device type
+	var elementSize int64
+	switch deviceType {
+	case builder.Float32, builder.INT32:
+		elementSize = 4
+	case builder.Float64, builder.INT64:
+		elementSize = 8
+	default:
+		elementSize = 8
+	}
+	totalSize := spec.Size * elementSize
+
+	if hostType == deviceType {
+		// No conversion needed
+		return kr.copyDirectFromDevice(spec.HostBinding, mem, totalSize)
+	}
+
+	// Type conversion needed
+	return kr.copyFromDeviceWithTypeConversion(mem, spec.HostBinding, deviceType, hostType, totalSize)
 }
