@@ -419,5 +419,3 @@ func (kb *Builder) GetIntSize() int {
 	}
 	return 8
 }
-
-// Note: GenerateKernelSignature is now implemented in the runner package using GetKernelArguments()

@@ -143,51 +143,6 @@ func (kr *Runner) allocateArrayFromSpec(spec *builder.ParamSpec) error {
 	return nil
 }
 
-// addStaticMatrixFromSpec adds a static matrix from parameter specification
-func (kr *Runner) addStaticMatrixFromSpec(spec *builder.ParamSpec) error {
-	var matrix mat.Matrix
-
-	if m, ok := spec.HostBinding.(mat.Matrix); ok {
-		matrix = m
-	} else if spec.HostBinding != nil && spec.Stride > 0 {
-		// Convert flat array to matrix
-		matrix = kr.flatArrayToMatrix(spec)
-	} else {
-		return fmt.Errorf("static matrix %s needs valid binding", spec.Name)
-	}
-
-	kr.AddStaticMatrix(spec.Name, matrix)
-	return nil
-}
-
-// addDeviceMatrixFromSpec adds a device matrix from parameter specification
-func (kr *Runner) addDeviceMatrixFromSpec(spec *builder.ParamSpec) error {
-	var matrix mat.Matrix
-
-	if m, ok := spec.HostBinding.(mat.Matrix); ok {
-		matrix = m
-	} else if spec.HostBinding != nil && spec.Stride > 0 {
-		// Convert flat array to matrix
-		matrix = kr.flatArrayToMatrix(spec)
-	} else {
-		// Create zero matrix if no binding
-		matrix = mat.NewDense(spec.MatrixRows, spec.MatrixCols, nil)
-	}
-
-	// Add to device matrices collection
-	kr.AddDeviceMatrix(spec.Name, matrix)
-
-	// Store binding if present
-	if spec.HostBinding != nil {
-		if kr.hostBindings == nil {
-			kr.hostBindings = make(map[string]interface{})
-		}
-		kr.hostBindings[spec.Name] = spec.HostBinding
-	}
-
-	return nil
-}
-
 // flatArrayToMatrix converts a flat array to a matrix using stride
 func (kr *Runner) flatArrayToMatrix(spec *builder.ParamSpec) mat.Matrix {
 	// This is a simplified version - real implementation would handle type conversion
@@ -220,6 +175,53 @@ func (kr *Runner) verifyExistingAllocation(spec *builder.ParamSpec) error {
 	}
 
 	// Update binding if provided
+	if spec.HostBinding != nil {
+		if kr.hostBindings == nil {
+			kr.hostBindings = make(map[string]interface{})
+		}
+		kr.hostBindings[spec.Name] = spec.HostBinding
+	}
+
+	return nil
+}
+
+// In kernel_definition.go, update matrix method calls:
+
+// addStaticMatrixFromSpec adds a static matrix from parameter specification
+func (kr *Runner) addStaticMatrixFromSpec(spec *builder.ParamSpec) error {
+	var matrix mat.Matrix
+
+	if m, ok := spec.HostBinding.(mat.Matrix); ok {
+		matrix = m
+	} else if spec.HostBinding != nil && spec.Stride > 0 {
+		// Convert flat array to matrix
+		matrix = kr.flatArrayToMatrix(spec)
+	} else {
+		return fmt.Errorf("static matrix %s needs valid binding", spec.Name)
+	}
+
+	kr.addStaticMatrix(spec.Name, matrix) // Changed from AddStaticMatrix
+	return nil
+}
+
+// addDeviceMatrixFromSpec adds a device matrix from parameter specification
+func (kr *Runner) addDeviceMatrixFromSpec(spec *builder.ParamSpec) error {
+	var matrix mat.Matrix
+
+	if m, ok := spec.HostBinding.(mat.Matrix); ok {
+		matrix = m
+	} else if spec.HostBinding != nil && spec.Stride > 0 {
+		// Convert flat array to matrix
+		matrix = kr.flatArrayToMatrix(spec)
+	} else {
+		// Create zero matrix if no binding
+		matrix = mat.NewDense(spec.MatrixRows, spec.MatrixCols, nil)
+	}
+
+	// Add to device matrices collection
+	kr.addDeviceMatrix(spec.Name, matrix) // Changed from AddDeviceMatrix
+
+	// Store binding if present
 	if spec.HostBinding != nil {
 		if kr.hostBindings == nil {
 			kr.hostBindings = make(map[string]interface{})

@@ -67,60 +67,6 @@ func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
 	return
 }
 
-func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
-	// Get kernel definition
-	def, exists := kr.kernelDefinitions[kernelName]
-	if !exists {
-		return fmt.Errorf("kernel %s not defined - use DefineKernel first", kernelName)
-	}
-
-	// Get compiled kernel
-	kernel, exists := kr.Kernels[kernelName]
-	if !exists {
-		return fmt.Errorf("kernel %s not compiled", kernelName)
-	}
-
-	// NEW: Validate offsets before kernel execution
-	for _, arrayName := range kr.GetAllocatedArrays() {
-		if err := kr.validateOffsets(arrayName, "before kernel "+kernelName); err != nil {
-			fmt.Printf("Pre-kernel validation failed: %v\n", err)
-		}
-	}
-
-	// Perform pre-kernel data copies (host→device)
-	if err := kr.performPreKernelCopies(def); err != nil {
-		return fmt.Errorf("pre-kernel copy failed: %w", err)
-	}
-
-	// Build kernel arguments
-	args, err := kr.buildKernelArguments(def, scalarValues)
-	if err != nil {
-		return fmt.Errorf("failed to build arguments: %w", err)
-	}
-
-	// Execute kernel
-	if err := kernel.RunWithArgs(args...); err != nil {
-		return fmt.Errorf("kernel execution failed: %w", err)
-	}
-
-	kr.Device.Finish()
-
-	// NEW: Validate offsets after kernel execution
-	for _, arrayName := range kr.GetAllocatedArrays() {
-		if err := kr.validateOffsets(arrayName, "after kernel "+kernelName); err != nil {
-			fmt.Printf("Post-kernel validation failed: %v\n", err)
-			// This tells us the kernel is corrupting offset memory
-		}
-	}
-
-	// Perform post-kernel data copies (device→host)
-	if err := kr.performPostKernelCopies(def); err != nil {
-		return fmt.Errorf("post-kernel copy failed: %w", err)
-	}
-
-	return nil
-}
-
 // performPreKernelCopies handles all host→device transfers before kernel execution
 func (kr *Runner) performPreKernelCopies(def *KernelDefinition) error {
 	for _, param := range def.Parameters {
@@ -143,73 +89,6 @@ func (kr *Runner) performPostKernelCopies(def *KernelDefinition) error {
 		}
 	}
 	return nil
-}
-
-// buildKernelArguments constructs the argument list for kernel execution
-func (kr *Runner) buildKernelArguments(def *KernelDefinition,
-	scalarValues []interface{}) ([]interface{}, error) {
-	var args []interface{}
-
-	// K array is always first
-	args = append(args, kr.PooledMemory["K"])
-
-	// Add device matrices in sorted order
-	deviceMatrixNames := make([]string, 0)
-	for _, p := range def.Parameters {
-		if p.IsMatrix && !p.IsStatic {
-			deviceMatrixNames = append(deviceMatrixNames, p.Name)
-		}
-	}
-	SortStrings(deviceMatrixNames)
-
-	for _, name := range deviceMatrixNames {
-		if mem, exists := kr.PooledMemory[name]; exists {
-			args = append(args, mem)
-		} else {
-			return nil, fmt.Errorf("device matrix %s not found", name)
-		}
-	}
-
-	// Add arrays
-	for _, p := range def.Parameters {
-		if p.Direction == builder.DirectionScalar || p.IsMatrix {
-			continue // Skip scalars and matrices
-		}
-
-		// Add global data pointer
-		globalMem, exists := kr.PooledMemory[p.Name+"_global"]
-		if !exists {
-			return nil, fmt.Errorf("memory for %s not found", p.Name)
-		}
-		args = append(args, globalMem)
-
-		// Add offset array
-		offsetMem, exists := kr.PooledMemory[p.Name+"_offsets"]
-		if !exists {
-			return nil, fmt.Errorf("offsets for %s not found", p.Name)
-		}
-		args = append(args, offsetMem)
-	}
-
-	// Add scalars last
-	scalarIdx := 0
-	for _, p := range def.Parameters {
-		if p.Direction == builder.DirectionScalar {
-			if scalarIdx >= len(scalarValues) {
-				// Use bound value if available
-				if p.HostBinding != nil {
-					args = append(args, p.HostBinding)
-				} else {
-					return nil, fmt.Errorf("no value provided for scalar %s", p.Name)
-				}
-			} else {
-				args = append(args, scalarValues[scalarIdx])
-				scalarIdx++
-			}
-		}
-	}
-
-	return args, nil
 }
 
 // GetKernelSignature generates the signature for a defined kernel
@@ -481,4 +360,136 @@ func (kr *Runner) validateOffsets(name string, context string) error {
 	}
 
 	return nil
+}
+
+// Key changes to runner.go:
+
+// Remove AllocateAndSetArrays method entirely
+
+// Remove old RunKernel variant that takes array names
+// Keep only this version:
+func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
+	// Get kernel definition
+	def, exists := kr.kernelDefinitions[kernelName]
+	if !exists {
+		return fmt.Errorf("kernel %s not defined - use DefineKernel first", kernelName)
+	}
+
+	// Get compiled kernel
+	kernel, exists := kr.Kernels[kernelName]
+	if !exists {
+		return fmt.Errorf("kernel %s not compiled", kernelName)
+	}
+
+	// Validate offsets before kernel execution
+	for _, arrayName := range kr.GetAllocatedArrays() {
+		if err := kr.validateOffsets(arrayName, "before kernel "+kernelName); err != nil {
+			fmt.Printf("Pre-kernel validation failed: %v\n", err)
+		}
+	}
+
+	// Perform pre-kernel data copies (host→device)
+	if err := kr.performPreKernelCopies(def); err != nil {
+		return fmt.Errorf("pre-kernel copy failed: %w", err)
+	}
+
+	// Build kernel arguments
+	args, err := kr.buildKernelArguments(def, scalarValues)
+	if err != nil {
+		return fmt.Errorf("failed to build arguments: %w", err)
+	}
+
+	// Execute kernel
+	if err := kernel.RunWithArgs(args...); err != nil {
+		return fmt.Errorf("kernel execution failed: %w", err)
+	}
+
+	kr.Device.Finish()
+
+	// Validate offsets after kernel execution
+	for _, arrayName := range kr.GetAllocatedArrays() {
+		if err := kr.validateOffsets(arrayName, "after kernel "+kernelName); err != nil {
+			fmt.Printf("Post-kernel validation failed: %v\n", err)
+		}
+	}
+
+	// Perform post-kernel data copies (device→host)
+	if err := kr.performPostKernelCopies(def); err != nil {
+		return fmt.Errorf("post-kernel copy failed: %w", err)
+	}
+
+	return nil
+}
+
+// Remove buildKernelArgs method entirely
+
+// Make matrix methods internal (lowercase first letter)
+func (kr *Runner) addStaticMatrix(name string, m mat.Matrix) {
+	kr.Builder.AddStaticMatrix(name, m)
+}
+
+func (kr *Runner) addDeviceMatrix(name string, m mat.Matrix) {
+	kr.Builder.AddDeviceMatrix(name, m)
+}
+
+// Update buildKernelArguments to only handle DefineKernel path
+func (kr *Runner) buildKernelArguments(def *KernelDefinition, scalarValues []interface{}) ([]interface{}, error) {
+	// Get ordered argument list for this definition
+	kernelArgs := kr.GetKernelArgumentsForDefinition(def)
+	args := make([]interface{}, 0, len(kernelArgs))
+
+	// Build arguments in order
+	for _, karg := range kernelArgs {
+		switch karg.Category {
+		case "system":
+			mem, exists := kr.PooledMemory[karg.MemoryKey]
+			if !exists {
+				return nil, fmt.Errorf("system memory %s not found", karg.MemoryKey)
+			}
+			args = append(args, mem)
+
+		case "matrix", "array_data", "array_offset":
+			mem, exists := kr.PooledMemory[karg.MemoryKey]
+			if !exists {
+				return nil, fmt.Errorf("memory for %s not found", karg.MemoryKey)
+			}
+			args = append(args, mem)
+
+		case "scalar":
+			// Find the scalar parameter
+			var found bool
+			for _, p := range def.Parameters {
+				if p.Direction == builder.DirectionScalar && p.Name == karg.Name {
+					if p.HostBinding != nil {
+						args = append(args, p.HostBinding)
+						found = true
+						break
+					}
+				}
+			}
+
+			// If not found in bindings, check passed values
+			if !found {
+				scalarIdx := 0
+				for _, p := range def.Parameters {
+					if p.Direction == builder.DirectionScalar {
+						if p.Name == karg.Name {
+							if scalarIdx < len(scalarValues) {
+								args = append(args, scalarValues[scalarIdx])
+								found = true
+							}
+							break
+						}
+						scalarIdx++
+					}
+				}
+			}
+
+			if !found {
+				return nil, fmt.Errorf("scalar %s not provided", karg.Name)
+			}
+		}
+	}
+
+	return args, nil
 }
