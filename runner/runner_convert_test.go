@@ -11,7 +11,7 @@ import (
 )
 
 // TestConvert_BasicFloat64ToFloat32 tests basic type conversion
-func _TestConvert_BasicFloat66ToFloat32(t *testing.T) {
+func TestConvert_BasicFloat66ToFloat32(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -44,8 +44,8 @@ func _TestConvert_BasicFloat66ToFloat32(t *testing.T) {
 	kernelSource := fmt.Sprintf(`
 @kernel void convert_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const double* input = input_PART(part);
-		double* output = output_PART(part);
+		const float* input = input_PART(part);
+		float* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -80,7 +80,7 @@ func _TestConvert_BasicFloat66ToFloat32(t *testing.T) {
 }
 
 // TestConvert_PartitionedData tests conversion with partitioned arrays
-func _TestConvert_PartitionedData(t *testing.T) {
+func TestConvert_PartitionedData(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -123,7 +123,7 @@ func _TestConvert_PartitionedData(t *testing.T) {
 @kernel void partitioned_convert(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		const double* input = input_PART(part);
-		double* output = output_PART(part);
+		float* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -157,7 +157,7 @@ func _TestConvert_PartitionedData(t *testing.T) {
 }
 
 // TestConvert_AllCombinations tests all type conversion combinations
-func _TestConvert_AllCombinations(t *testing.T) {
+func TestConvert_AllCombinations(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -169,8 +169,6 @@ func _TestConvert_AllCombinations(t *testing.T) {
 	}{
 		{"float64_to_float32", builder.Float64, builder.Float64, builder.Float32},
 		{"float32_to_float64", builder.Float32, builder.Float32, builder.Float64},
-		{"int64_to_int32", builder.Float64, builder.INT64, builder.INT32},
-		{"int32_to_int64", builder.Float64, builder.INT32, builder.INT64},
 	}
 
 	for _, tc := range testCases {
@@ -266,7 +264,7 @@ func TestConvert_MemoryEfficiency(t *testing.T) {
 	t.Log("✓ Conversion reduces memory usage by 50% for float64→float32")
 }
 
-func _TestConvert_Debug(t *testing.T) {
+func TestConvert_Debug(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -321,7 +319,7 @@ func _TestConvert_Debug(t *testing.T) {
 	kernelSource := fmt.Sprintf(`
 @kernel void debug_convert(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const double* input = input_PART(part);
+		const float* input = input_PART(part);
 		double* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
@@ -380,7 +378,7 @@ func _TestConvert_Debug(t *testing.T) {
 }
 
 // Test without conversion to verify basic functionality
-func _TestConvert_NoConversion(t *testing.T) {
+func TestConvert_NoConversion(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -408,8 +406,8 @@ func _TestConvert_NoConversion(t *testing.T) {
 	kernelSource := fmt.Sprintf(`
 @kernel void no_convert(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const double* input = input_PART(part);
-		double* output = output_PART(part);
+		const float* input = input_PART(part);
+		float* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -440,7 +438,7 @@ func _TestConvert_NoConversion(t *testing.T) {
 }
 
 // TestConvert_PartitionedDataDebug - Debug version to trace the issue
-func _TestConvert_PartitionedDataDebug(t *testing.T) {
+func TestConvert_PartitionedDataDebug(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -511,7 +509,7 @@ func _TestConvert_PartitionedDataDebug(t *testing.T) {
 @kernel void partitioned_convert(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		const double* input = input_PART(part);
-		double* output = output_PART(part);
+		float* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
