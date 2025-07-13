@@ -74,12 +74,12 @@ func TestTetNudgMatCopy(t *testing.T) {
 
 @kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
-        const real_t* U = U_PART(part);
-        real_t* Ur = Ur_PART(part);
+        const double* U = U_PART(part);
+        double* Ur = Ur_PART(part);
         MATMUL_Dr_%s(U, Ur, K[part]);
 
-        real_t* Dx = Dx_PART(part);
-        const real_t* Rx = Rx_PART(part);
+        double* Dx = Dx_PART(part);
+        const double* Rx = Rx_PART(part);
 		// Single partition means we can safely use KpartMax as K[part]
 		for (int i = 0; i < NP*KpartMax; ++i; @inner) {
 			Dx[i] = Rx[i]*Ur[i];
@@ -154,9 +154,9 @@ func TestTetNudgArrayReturn(t *testing.T) {
 
 @kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
-        const real_t* U = U_PART(part);
-        real_t* Dx = Dx_PART(part);
-        const real_t* Rx = Rx_PART(part);
+        const double* U = U_PART(part);
+        double* Dx = Dx_PART(part);
+        const double* Rx = Rx_PART(part);
         
         // Use nested loops to avoid exceeding CUDA thread block limits
         for (int n = 0; n < NP; ++n; @inner) {
@@ -264,12 +264,12 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 
 @kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
-        const real_t* U = U_PART(part);
-        real_t* Ur = Ur_PART(part);
+        const double* U = U_PART(part);
+        double* Ur = Ur_PART(part);
         MATMUL_Dr_%s(U, Ur, K[part]);
 
-        real_t* Dx = Dx_PART(part);
-        const real_t* Rx = Rx_PART(part);
+        double* Dx = Dx_PART(part);
+        const double* Rx = Rx_PART(part);
 		// Single partition means we can safely use KpartMax as K[part]
         // ************************************************************
 		// *** This computation is happening in column-major format ***
@@ -390,26 +390,26 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 
 @kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
-        const real_t* U = U_PART(part);
-        real_t* Ur = Ur_PART(part);
-        real_t* Us = Us_PART(part);
-        real_t* Ut = Ut_PART(part);
+        const double* U = U_PART(part);
+        double* Ur = Ur_PART(part);
+        double* Us = Us_PART(part);
+        double* Ut = Ut_PART(part);
         MATMUL_Dr_%s(U, Ur, K[part]);
         MATMUL_Ds_%s(U, Us, K[part]);
         MATMUL_Dt_%s(U, Ut, K[part]);
 
-        real_t* DuDx = DuDx_PART(part);
-        real_t* DuDy = DuDy_PART(part);
-        real_t* DuDz = DuDz_PART(part);
-        const real_t* Rx = Rx_PART(part);
-        const real_t* Sx = Sx_PART(part);
-        const real_t* Tx = Tx_PART(part);
-        const real_t* Ry = Ry_PART(part);
-        const real_t* Sy = Sy_PART(part);
-        const real_t* Ty = Ty_PART(part);
-        const real_t* Rz = Rz_PART(part);
-        const real_t* Sz = Sz_PART(part);
-        const real_t* Tz = Tz_PART(part);
+        double* DuDx = DuDx_PART(part);
+        double* DuDy = DuDy_PART(part);
+        double* DuDz = DuDz_PART(part);
+        const double* Rx = Rx_PART(part);
+        const double* Sx = Sx_PART(part);
+        const double* Tx = Tx_PART(part);
+        const double* Ry = Ry_PART(part);
+        const double* Sy = Sy_PART(part);
+        const double* Ty = Ty_PART(part);
+        const double* Rz = Rz_PART(part);
+        const double* Sz = Sz_PART(part);
+        const double* Tz = Tz_PART(part);
 		// Single partition means we can safely use KpartMax as K[part]
         // ************************************************************
 		// *** This computation is happening in column-major format ***
@@ -518,26 +518,26 @@ func CalculatePhysicalDerivative(t *testing.T, device *gocca.OCCADevice,
 
 @kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
-        const real_t* U = U_PART(part);
-        real_t* Ur = Ur_PART(part);
-        real_t* Us = Us_PART(part);
-        real_t* Ut = Ut_PART(part);
+        const double* U = U_PART(part);
+        double* Ur = Ur_PART(part);
+        double* Us = Us_PART(part);
+        double* Ut = Ut_PART(part);
         MATMUL_Dr_%s(U, Ur, K[part]);
         MATMUL_Ds_%s(U, Us, K[part]);
         MATMUL_Dt_%s(U, Ut, K[part]);
 
-        real_t* DuDx = DuDx_PART(part);
-        real_t* DuDy = DuDy_PART(part);
-        real_t* DuDz = DuDz_PART(part);
-        const real_t* Rx = Rx_PART(part);
-        const real_t* Sx = Sx_PART(part);
-        const real_t* Tx = Tx_PART(part);
-        const real_t* Ry = Ry_PART(part);
-        const real_t* Sy = Sy_PART(part);
-        const real_t* Ty = Ty_PART(part);
-        const real_t* Rz = Rz_PART(part);
-        const real_t* Sz = Sz_PART(part);
-        const real_t* Tz = Tz_PART(part);
+        double* DuDx = DuDx_PART(part);
+        double* DuDy = DuDy_PART(part);
+        double* DuDz = DuDz_PART(part);
+        const double* Rx = Rx_PART(part);
+        const double* Sx = Sx_PART(part);
+        const double* Tx = Tx_PART(part);
+        const double* Ry = Ry_PART(part);
+        const double* Sy = Sy_PART(part);
+        const double* Ty = Ty_PART(part);
+        const double* Rz = Rz_PART(part);
+        const double* Sz = Sz_PART(part);
+        const double* Tz = Tz_PART(part);
         // ************************************************************
 		// *** This computation is happening in column-major format ***
         // ************************************************************

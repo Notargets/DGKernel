@@ -123,7 +123,7 @@ func TestRunner_BasicComputation(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
+		double* data = data_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -210,9 +210,9 @@ func TestRunner_MultiplePartitions(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* A = A_PART(part);
-		const real_t* B = B_PART(part);
-		real_t* C = C_PART(part);
+		const double* A = A_PART(part);
+		const double* B = B_PART(part);
+		double* C = C_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {

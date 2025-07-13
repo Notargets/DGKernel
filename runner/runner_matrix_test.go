@@ -60,8 +60,8 @@ func TestRunner_MatrixOperations(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
-		real_t* V = V_PART(part);
+		const double* U = U_PART(part);
+		double* V = V_PART(part);
 		
 		MATMUL_TestMat(U, V, K[part]);
 	}
@@ -131,8 +131,8 @@ func TestRunner_DeviceMatrix(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
-		real_t* Ur = Ur_PART(part);
+		const double* U = U_PART(part);
+		double* Ur = Ur_PART(part);
 		
 		MATMUL_Dr(U, Ur, K[part]);
 	}

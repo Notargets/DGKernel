@@ -47,7 +47,7 @@ func TestSimpleScalarKernel(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* RHS = RHS_PART(part);
+		double* RHS = RHS_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			RHS[i] = alpha;
 		}
@@ -121,8 +121,8 @@ func TestParameterAPI_BasicUsage(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
-		real_t* RHS = RHS_PART(part);
+		const double* U = U_PART(part);
+		double* RHS = RHS_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -214,8 +214,8 @@ func TestParameterAPI_MatrixSupport(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
-		real_t* Ur = Ur_PART(part);
+		const double* U = U_PART(part);
+		double* Ur = Ur_PART(part);
 		
 		// Static matrix Dr is embedded, device matrix Mass is passed as parameter
 		MATMUL_Dr(U, Ur, K[part]);
@@ -292,7 +292,7 @@ func TestParameterAPI_InOut(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
+		double* data = data_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {

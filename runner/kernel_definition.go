@@ -246,6 +246,30 @@ func (kr *Runner) addDeviceMatrixFromSpec(spec *builder.ParamSpec) error {
 	return nil
 }
 
+// getParamTypeString returns the C type string for a parameter based on its effective type
+func (kr *Runner) getParamTypeString(param *builder.ParamSpec) string {
+	effectiveType := param.GetEffectiveType()
+	return kr.dataTypeToCType(effectiveType)
+}
+
+// dataTypeToCType converts a builder.DataType to its C type string
+func (kr *Runner) dataTypeToCType(dt builder.DataType) string {
+	switch dt {
+	case builder.Float32:
+		return "float"
+	case builder.Float64:
+		return "double"
+	case builder.INT32:
+		return "int"
+	case builder.INT64:
+		return "long"
+	default:
+		return "double" // fallback
+	}
+}
+
+// In runner/kernel_definition.go, update the GetKernelSignature method
+
 // GetKernelSignature generates the signature for a defined kernel
 // This now uses array-specific types instead of real_t
 func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
@@ -301,33 +325,12 @@ func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
 				}
 				params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
 			} else {
-				// System arrays use their defined type
-				params = append(params, fmt.Sprintf("%s%s* %s", constStr, arg.Type, arg.Name))
+				// System arrays already have the complete type including pointer
+				// arg.Type is already "int_t*" for K array, don't add another *
+				params = append(params, fmt.Sprintf("%s%s %s", constStr, arg.Type, arg.Name))
 			}
 		}
 	}
 
 	return strings.Join(params, ",\n\t"), nil
-}
-
-// getParamTypeString returns the C type string for a parameter based on its effective type
-func (kr *Runner) getParamTypeString(param *builder.ParamSpec) string {
-	effectiveType := param.GetEffectiveType()
-	return kr.dataTypeToCType(effectiveType)
-}
-
-// dataTypeToCType converts a builder.DataType to its C type string
-func (kr *Runner) dataTypeToCType(dt builder.DataType) string {
-	switch dt {
-	case builder.Float32:
-		return "float"
-	case builder.Float64:
-		return "double"
-	case builder.INT32:
-		return "int"
-	case builder.INT64:
-		return "long"
-	default:
-		return "double" // fallback
-	}
 }

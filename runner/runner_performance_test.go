@@ -79,9 +79,9 @@ func benchmarkMatrixOps(b *testing.B, k []int, np int) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* U = U_PART(part);
-		real_t* V = V_PART(part);
-		real_t* W = W_PART(part);
+		double* U = U_PART(part);
+		double* V = V_PART(part);
+		double* W = W_PART(part);
 		
 		// Chain of operations: U→V→W→U (3 iterations)
 		for (int iter = 0; iter < 3; ++iter) {
@@ -228,9 +228,9 @@ func BenchmarkRunner_MemoryPatterns(b *testing.B) {
 		kernelSource := fmt.Sprintf(`
 @kernel void with_temp(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
-		real_t* scratch1 = scratch1_PART(part);
-		real_t* scratch2 = scratch2_PART(part);
+		const double* U = U_PART(part);
+		double* scratch1 = scratch1_PART(part);
+		double* scratch2 = scratch2_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -275,7 +275,7 @@ func BenchmarkRunner_MemoryPatterns2(b *testing.B) {
 		kernelSource := fmt.Sprintf(`
 @kernel void inout(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
+		double* data = data_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {

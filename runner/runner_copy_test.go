@@ -39,12 +39,12 @@ func TestRunner_CopySemantics(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void copyto_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* data = data_PART(part);
+		const double* data = data_PART(part);
 		// Read-only access
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				// Just read, don't modify
-				volatile real_t val = data[i];
+				volatile double val = data[i];
 			}
 		}
 	}
@@ -79,7 +79,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void copy_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
+		double* data = data_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				data[i] = data[i] * 2.0;
@@ -119,7 +119,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void copy_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
+		double* data = data_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				data[i] = data[i] * 2.0;
@@ -161,8 +161,8 @@ func TestRunner_CopySemantics(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void copy_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* data = data_PART(part);
-		real_t* ret = ret_PART(part);
+		const double* data = data_PART(part);
+		double* ret = ret_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				ret[i] = data[i] * 2.0;
@@ -199,10 +199,10 @@ func TestRunner_CopySemantics(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void nocopy_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
+		double* data = data_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
-				//data[i] = (real_t)(i * i);
+				//data[i] = (double)(i * i);
 				data[i] = i * i;
 			}
 		}
@@ -271,7 +271,7 @@ func TestRunner_PartitionCopy(t *testing.T) {
 	kernelSource := fmt.Sprintf(`
 @kernel void partition_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* data = data_PART(part);
+		double* data = data_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				data[i] += 1000.0; // Add 1000 to each element
@@ -336,8 +336,8 @@ func TestRunner_TypeConversion(t *testing.T) {
 	kernelSource := fmt.Sprintf(`
 @kernel void convert_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* input = input_PART(part);
-		real_t* output = output_PART(part);
+		const double* input = input_PART(part);
+		double* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -394,10 +394,10 @@ func TestRunner_WorkingArrays(t *testing.T) {
 	kernelSource := fmt.Sprintf(`
 @kernel void working_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* input = input_PART(part);
-		real_t* output = output_PART(part);
-		real_t* scratch1 = scratch1_PART(part);
-		real_t* scratch2 = scratch2_PART(part);
+		const double* input = input_PART(part);
+		double* output = output_PART(part);
+		double* scratch1 = scratch1_PART(part);
+		double* scratch2 = scratch2_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {

@@ -115,10 +115,7 @@ func TestDGKernel_CodeGen_TypesAndConstants(t *testing.T) {
 
 	// Check type definitions
 	expectedTypes := []string{
-		"typedef double real_t",
 		"typedef long int_t",
-		"#define REAL_ZERO 0.0",
-		"#define REAL_ONE 1.0",
 	}
 
 	for _, expected := range expectedTypes {
@@ -299,8 +296,8 @@ func TestDGKernel_NewAPI_MatrixOperation(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
-		real_t* Ur = Ur_PART(part);
+		const double* U = U_PART(part);
+		double* Ur = Ur_PART(part);
 		MATMUL_Dr(U, Ur, K[part]);
 	}
 }
@@ -382,9 +379,9 @@ func TestDGKernel_NewAPI_MultipleArrays(t *testing.T) {
 	%s
 ) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const real_t* U = U_PART(part);
-		const real_t* V = V_PART(part);
-		real_t* W = W_PART(part);
+		const double* U = U_PART(part);
+		const double* V = V_PART(part);
+		double* W = W_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {

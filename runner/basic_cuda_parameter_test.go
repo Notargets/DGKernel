@@ -37,7 +37,7 @@ func TestScalarMinimal(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void memtest(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* output = output_PART(part);
+		double* output = output_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				output[i] = 42.0;
@@ -109,7 +109,7 @@ func TestScalarMinimal(t *testing.T) {
 			kernelSource := fmt.Sprintf(`
 @kernel void compare(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* output = output_PART(part);
+		double* output = output_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				output[i] = alpha;
@@ -183,7 +183,7 @@ func TestCudaScalarDebug(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void hardcoded(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* output = output_PART(part);
+		double* output = output_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				output[i] = 2.5;  // Hardcoded value
@@ -228,8 +228,8 @@ func TestCudaScalarDebug(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void scalardebug(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* output = output_PART(part);
-		real_t* debug = debug_PART(part);
+		double* output = output_PART(part);
+		double* debug = debug_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -237,7 +237,7 @@ func TestCudaScalarDebug(t *testing.T) {
 				if (i == 0) {
 					debug[0] = 1.0;        // Kernel executed
 					debug[1] = alpha;      // Scalar value received
-					debug[2] = (real_t)K[part]; // K value
+					debug[2] = (double)K[part]; // K value
 				}
 				
 				output[i] = alpha;
@@ -286,7 +286,7 @@ func TestCudaScalarDebug(t *testing.T) {
 		kernelSource := fmt.Sprintf(`
 @kernel void multiscalar(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* output = output_PART(part);
+		double* output = output_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				output[i] = alpha + beta;  // Should be 5.5
@@ -441,7 +441,7 @@ func TestSimplestCudaScalar(t *testing.T) {
 	kernelSource := fmt.Sprintf(`
 @kernel void simple(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		real_t* output = output_PART(part);
+		double* output = output_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
 				output[i] = alpha;
