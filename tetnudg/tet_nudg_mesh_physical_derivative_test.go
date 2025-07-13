@@ -613,7 +613,7 @@ func CalculatePhysicalDerivative32(t *testing.T, device *gocca.OCCADevice,
 
 	// Add array parameters
 	params = append(params,
-		builder.Input("U").Bind(U).CopyTo().Convert(builder.Float32),
+		builder.Input("U").Bind(U).CopyTo(),
 		builder.Input("Rx").Bind(Rx).CopyTo().Convert(builder.Float32),
 		builder.Input("Sx").Bind(Sx).CopyTo().Convert(builder.Float32),
 		builder.Input("Tx").Bind(Tx).CopyTo().Convert(builder.Float32),
@@ -626,9 +626,9 @@ func CalculatePhysicalDerivative32(t *testing.T, device *gocca.OCCADevice,
 		builder.Output("DuDx").Bind(DuDx).CopyBack().Convert(builder.Float32),
 		builder.Output("DuDy").Bind(DuDy).CopyBack().Convert(builder.Float32),
 		builder.Output("DuDz").Bind(DuDz).CopyBack().Convert(builder.Float32),
-		builder.Temp("Ur").Type(builder.Float32).Size(totalNodes),
-		builder.Temp("Us").Type(builder.Float32).Size(totalNodes),
-		builder.Temp("Ut").Type(builder.Float32).Size(totalNodes),
+		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
+		builder.Temp("Us").Type(builder.Float64).Size(totalNodes),
+		builder.Temp("Ut").Type(builder.Float64).Size(totalNodes),
 	)
 
 	// Define kernel with all parameters
@@ -645,10 +645,10 @@ func CalculatePhysicalDerivative32(t *testing.T, device *gocca.OCCADevice,
 
 @kernel void %s(%s) {
     for (int part = 0; part < NPART; ++part; @outer) {
-        const float* U = U_PART(part);
-        float* Ur = Ur_PART(part);
-        float* Us = Us_PART(part);
-        float* Ut = Ut_PART(part);
+        const double* U = U_PART(part);
+        double* Ur = Ur_PART(part);
+        double* Us = Us_PART(part);
+        double* Ut = Ut_PART(part);
         MATMUL_Dr_%s(U, Ur, K[part]);
         MATMUL_Ds_%s(U, Us, K[part]);
         MATMUL_Dt_%s(U, Ut, K[part]);
@@ -668,13 +668,9 @@ func CalculatePhysicalDerivative32(t *testing.T, device *gocca.OCCADevice,
         // ************************************************************
 		// *** This computation is happening in column-major format ***
         // ************************************************************
-		// Multiple partitions means we need to check bounds
-        // for (int n = 0; n < NP; ++n; @inner) {
         for (int k = 0; k < KpartMax; ++k; @inner) {
             	if (k < K[part]) {  // Bounds check for partition size
         		for (int n = 0; n < NP; ++n) {
-        	// for (int k = 0; k < KpartMax; ++k) {
-            // 	if (k < K[part]) {  // Bounds check for partition size
                 	int i = n + k*NP;  // Column-major indexing
 					DuDx[i] = Rx[i]*Ur[i] + Sx[i]*Us[i] + Tx[i]*Ut[i];
 					DuDy[i] = Ry[i]*Ur[i] + Sy[i]*Us[i] + Ty[i]*Ut[i];
@@ -791,17 +787,20 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 			device = utils.CreateTestDevice()
 		}
 		defer device.Free()
-		DuDx, DuDy, DuDz, elapsed := CalculatePhysicalDerivative(t, device, k,
+		DuDx, DuDy, DuDz, elapsed := CalculatePhysicalDerivative32(t, device, k,
+			// DuDx, DuDy, DuDz, elapsed := CalculatePhysicalDerivative(t, device, k,
 			tn,
 			U, Rx, Ry, Rz, Sx, Sy, Sz, Tx, Ty, Tz)
 
+		tol := 7.e-7
+		// tol := 1.e-8
 		for i := range DuDxXp {
 			assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDzXp[i]).RawMatrix().Data,
-				mat.DenseCopyOf(DuDz[i]).RawMatrix().Data, 1.e-8, "")
+				mat.DenseCopyOf(DuDz[i]).RawMatrix().Data, tol, "")
 			assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDxXp[i]).RawMatrix().Data,
-				mat.DenseCopyOf(DuDx[i]).RawMatrix().Data, 1.e-8, "")
+				mat.DenseCopyOf(DuDx[i]).RawMatrix().Data, tol, "")
 			assert.InDeltaSlicef(t, mat.DenseCopyOf(DuDyXp[i]).RawMatrix().Data,
-				mat.DenseCopyOf(DuDy[i]).RawMatrix().Data, 1.e-8, "")
+				mat.DenseCopyOf(DuDy[i]).RawMatrix().Data, tol, "")
 		}
 		t.Logf("%s calculation of physical derivative validates", DevName)
 		t.Logf("%s calculation took %5.4f Milliseconds", DevName,

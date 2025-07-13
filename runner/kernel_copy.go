@@ -13,19 +13,19 @@ import (
 func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *gocca.OCCAMemory,
 	offsets []int64, needsConversion bool, sourceType builder.DataType) error {
 
-	fmt.Printf("\n=== BEGIN copyMatrixPartitionsFromDevice DEBUG ===\n")
-	fmt.Printf("Num partitions: %d, needsConversion: %v, sourceType: %v\n",
-		kr.NumPartitions, needsConversion, sourceType)
-	fmt.Printf("Offsets: %v\n", offsets)
+	// fmt.Printf("\n=== BEGIN copyMatrixPartitionsFromDevice DEBUG ===\n")
+	// fmt.Printf("Num partitions: %d, needsConversion: %v, sourceType: %v\n",
+	// 	kr.NumPartitions, needsConversion, sourceType)
+	// fmt.Printf("Offsets: %v\n", offsets)
 
 	for i, matrix := range data {
 		if i >= kr.NumPartitions {
 			break
 		}
 
-		fmt.Printf("\nPartition %d:\n", i)
+		// fmt.Printf("\nPartition %d:\n", i)
 		rows, cols := matrix.Dims()
-		fmt.Printf("  Matrix dims: %dx%d = %d elements\n", rows, cols, rows*cols)
+		// fmt.Printf("  Matrix dims: %dx%d = %d elements\n", rows, cols, rows*cols)
 		size := rows * cols
 
 		if needsConversion && sourceType == builder.Float32 {
@@ -34,14 +34,14 @@ func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *g
 			partitionBytes := int64(size * 4)
 			offsetBytes := offsets[i] * 4
 
-			fmt.Printf("  Conversion path (float32 -> float64)\n")
-			fmt.Printf("  Partition bytes: %d\n", partitionBytes)
-			fmt.Printf("  Offset bytes: %d\n", offsetBytes)
-			fmt.Printf("  Calling CopyToWithOffset...\n")
+			// fmt.Printf("  Conversion path (float32 -> float64)\n")
+			// fmt.Printf("  Partition bytes: %d\n", partitionBytes)
+			// fmt.Printf("  Offset bytes: %d\n", offsetBytes)
+			// fmt.Printf("  Calling CopyToWithOffset...\n")
 
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
 
-			fmt.Printf("  CopyToWithOffset succeeded\n")
+			// fmt.Printf("  CopyToWithOffset succeeded\n")
 
 			// Type assert to mutable matrix
 			if m, ok := matrix.(*mat.Dense); ok {
@@ -59,24 +59,24 @@ func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *g
 			partitionBytes := int64(size * 8)
 			offsetBytes := offsets[i] * 8
 
-			fmt.Printf("  Direct copy path (no conversion)\n")
-			fmt.Printf("  Partition bytes: %d\n", partitionBytes)
-			fmt.Printf("  Offset bytes: %d\n", offsetBytes)
-			fmt.Printf("  Access range: [%d, %d)\n", offsetBytes, offsetBytes+partitionBytes)
+			// fmt.Printf("  Direct copy path (no conversion)\n")
+			// fmt.Printf("  Partition bytes: %d\n", partitionBytes)
+			// fmt.Printf("  Offset bytes: %d\n", offsetBytes)
+			// fmt.Printf("  Access range: [%d, %d)\n", offsetBytes, offsetBytes+partitionBytes)
 
 			// DEBUG: Check if we have a next offset to verify bounds
 			if i+1 < len(offsets) {
 				nextOffsetBytes := offsets[i+1] * 8
-				fmt.Printf("  Next partition starts at: %d bytes\n", nextOffsetBytes)
+				// fmt.Printf("  Next partition starts at: %d bytes\n", nextOffsetBytes)
 				if offsetBytes+partitionBytes > nextOffsetBytes {
-					fmt.Printf("  *** WARNING: Would overrun into next partition! ***\n")
+					// fmt.Printf("  *** WARNING: Would overrun into next partition! ***\n")
 				}
 			}
 
 			// This is where the error occurs
-			fmt.Printf("  Calling CopyToWithOffset...\n")
+			// fmt.Printf("  Calling CopyToWithOffset...\n")
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&flatData[0]), partitionBytes, offsetBytes)
-			fmt.Printf("  CopyToWithOffset succeeded\n")
+			// fmt.Printf("  CopyToWithOffset succeeded\n")
 
 			// Type assert to mutable matrix
 			if m, ok := matrix.(*mat.Dense); ok {
@@ -89,10 +89,10 @@ func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *g
 				}
 			}
 		}
-		fmt.Printf("\n")
+		// fmt.Printf("\n")
 	}
 
-	fmt.Printf("=== END copyMatrixPartitionsFromDevice DEBUG ===\n\n")
+	// fmt.Printf("=== END copyMatrixPartitionsFromDevice DEBUG ===\n\n")
 	return nil
 }
 
