@@ -9,6 +9,285 @@ import (
 	"unsafe"
 )
 
+// copyMatrixPartitionsFromDevice handles matrix partition copies from device
+func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *gocca.OCCAMemory,
+	offsets []int64, needsConversion bool, sourceType builder.DataType) error {
+
+	fmt.Printf("\n=== BEGIN copyMatrixPartitionsFromDevice DEBUG ===\n")
+	fmt.Printf("Num partitions: %d, needsConversion: %v, sourceType: %v\n",
+		kr.NumPartitions, needsConversion, sourceType)
+	fmt.Printf("Offsets: %v\n", offsets)
+
+	for i, matrix := range data {
+		if i >= kr.NumPartitions {
+			break
+		}
+
+		fmt.Printf("\nPartition %d:\n", i)
+		rows, cols := matrix.Dims()
+		fmt.Printf("  Matrix dims: %dx%d = %d elements\n", rows, cols, rows*cols)
+		size := rows * cols
+
+		if needsConversion && sourceType == builder.Float32 {
+			// Read as float32 and convert
+			temp := make([]float32, size)
+			partitionBytes := int64(size * 4)
+			offsetBytes := offsets[i] * 4
+
+			fmt.Printf("  Conversion path (float32 -> float64)\n")
+			fmt.Printf("  Partition bytes: %d\n", partitionBytes)
+			fmt.Printf("  Offset bytes: %d\n", offsetBytes)
+			fmt.Printf("  Calling CopyToWithOffset...\n")
+
+			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
+
+			fmt.Printf("  CopyToWithOffset succeeded\n")
+
+			// Type assert to mutable matrix
+			if m, ok := matrix.(*mat.Dense); ok {
+				// Convert and unpack
+				for r := 0; r < rows; r++ {
+					for c := 0; c < cols; c++ {
+						val := float64(temp[c*rows+r])
+						m.Set(r, c, val)
+					}
+				}
+			}
+		} else {
+			// Direct copy
+			flatData := make([]float64, size)
+			partitionBytes := int64(size * 8)
+			offsetBytes := offsets[i] * 8
+
+			fmt.Printf("  Direct copy path (no conversion)\n")
+			fmt.Printf("  Partition bytes: %d\n", partitionBytes)
+			fmt.Printf("  Offset bytes: %d\n", offsetBytes)
+			fmt.Printf("  Access range: [%d, %d)\n", offsetBytes, offsetBytes+partitionBytes)
+
+			// DEBUG: Check if we have a next offset to verify bounds
+			if i+1 < len(offsets) {
+				nextOffsetBytes := offsets[i+1] * 8
+				fmt.Printf("  Next partition starts at: %d bytes\n", nextOffsetBytes)
+				if offsetBytes+partitionBytes > nextOffsetBytes {
+					fmt.Printf("  *** WARNING: Would overrun into next partition! ***\n")
+				}
+			}
+
+			// This is where the error occurs
+			fmt.Printf("  Calling CopyToWithOffset...\n")
+			deviceMem.CopyToWithOffset(unsafe.Pointer(&flatData[0]), partitionBytes, offsetBytes)
+			fmt.Printf("  CopyToWithOffset succeeded\n")
+
+			// Type assert to mutable matrix
+			if m, ok := matrix.(*mat.Dense); ok {
+				// Unpack column-major data back into the Dense matrix
+				for r := 0; r < rows; r++ {
+					for c := 0; c < cols; c++ {
+						val := flatData[c*rows+r]
+						m.Set(r, c, val)
+					}
+				}
+			}
+		}
+		fmt.Printf("\n")
+	}
+
+	fmt.Printf("=== END copyMatrixPartitionsFromDevice DEBUG ===\n\n")
+	return nil
+}
+
+// copyMatrixToDevice copies a matrix to device with transposition
+func (kr *Runner) copyMatrixToDevice(matrix mat.Matrix, mem *gocca.OCCAMemory, dataType builder.DataType) error {
+	rows, cols := matrix.Dims()
+	totalElements := rows * cols
+
+	if dataType == builder.Float64 {
+		// Transpose to column-major
+		transposed := make([]float64, totalElements)
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				transposed[j*rows+i] = matrix.At(i, j)
+			}
+		}
+		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
+	} else {
+		// Convert and transpose
+		transposed := make([]float32, totalElements)
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				transposed[j*rows+i] = float32(matrix.At(i, j))
+			}
+		}
+		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*4))
+	}
+	return nil
+}
+
+// copyMatrixFromDevice copies a matrix from device with transposition
+func (kr *Runner) copyMatrixFromDevice(matrix mat.Matrix, mem *gocca.OCCAMemory, dataType builder.DataType) error {
+	// Type assert to get mutable matrix
+	m, ok := matrix.(*mat.Dense)
+	if !ok {
+		return fmt.Errorf("matrix must be *mat.Dense for copy back")
+	}
+
+	rows, cols := m.Dims()
+	totalElements := rows * cols
+
+	if dataType == builder.Float64 {
+		// Read column-major data
+		transposed := make([]float64, totalElements)
+		mem.CopyTo(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
+
+		// Transpose back to row-major
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				m.Set(i, j, transposed[j*rows+i])
+			}
+		}
+	} else {
+		// Read and convert
+		transposed := make([]float32, totalElements)
+		mem.CopyTo(unsafe.Pointer(&transposed[0]), int64(totalElements*4))
+
+		// Transpose and convert back
+		for i := 0; i < rows; i++ {
+			for j := 0; j < cols; j++ {
+				m.Set(i, j, float64(transposed[j*rows+i]))
+			}
+		}
+	}
+	return nil
+}
+
+// copyDirectToDevice performs direct copy to device without conversion
+func (kr *Runner) copyDirectToDevice(hostData interface{}, mem *gocca.OCCAMemory) error {
+	switch data := hostData.(type) {
+	case []float64:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+	case []float32:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
+	case []int32:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
+	case []int64:
+		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+	case mat.Matrix:
+		// Need to determine the matrix type from metadata
+		// This will be called from copyToDeviceWithConversion which has the type info
+		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixToDevice directly")
+	// Add support for partitioned data types
+	case [][]float64, [][]float32, [][]int32, [][]int64, []mat.Matrix:
+		return fmt.Errorf("partitioned data requires special handling - use copyPartitionedData directly")
+	default:
+		return fmt.Errorf("unsupported type for direct copy: %T", data)
+	}
+	return nil
+}
+
+// copyDirectFromDevice performs direct copy from device without conversion
+func (kr *Runner) copyDirectFromDevice(hostData interface{}, mem *gocca.OCCAMemory, size int64) error {
+	switch data := hostData.(type) {
+	case []float64:
+		mem.CopyTo(unsafe.Pointer(&data[0]), size)
+	case []float32:
+		mem.CopyTo(unsafe.Pointer(&data[0]), size)
+	case []int32:
+		mem.CopyTo(unsafe.Pointer(&data[0]), size)
+	case []int64:
+		mem.CopyTo(unsafe.Pointer(&data[0]), size)
+	case mat.Matrix:
+		// Need to determine the matrix type from metadata
+		// This will be called from copyFromDeviceWithConversion which has the type info
+		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixFromDevice directly")
+	// Add support for partitioned data types
+	case [][]float64, [][]float32, [][]int32, [][]int64, []mat.Matrix:
+		return fmt.Errorf("partitioned data requires special handling - use copyPartitionedDataFromDevice directly")
+	default:
+		return fmt.Errorf("unsupported type for direct copy from device: %T", data)
+	}
+	return nil
+}
+
+func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
+	if spec.HostBinding == nil {
+		return nil // Nothing to copy
+	}
+
+	// Get memory - this handles both partitioned and non-partitioned cases
+	mem := kr.GetMemory(spec.Name)
+	if mem == nil {
+		return fmt.Errorf("no device memory allocated for %s", spec.Name)
+	}
+
+	// Handle partitioned data types ([][]T format)
+	if spec.IsPartitioned {
+		return kr.copyPartitionedData(spec, mem)
+	}
+
+	// Handle matrix types specially
+	if matrix, ok := spec.HostBinding.(mat.Matrix); ok {
+		return kr.copyMatrixToDevice(matrix, mem, spec.GetEffectiveType())
+	}
+
+	// For non-matrix, non-partitioned types
+	hostType := spec.DataType
+	deviceType := spec.GetEffectiveType()
+
+	if hostType == deviceType {
+		// No conversion needed
+		return kr.copyDirectToDevice(spec.HostBinding, mem)
+	}
+
+	// Type conversion needed
+	return kr.copyWithTypeConversion(spec.HostBinding, mem, hostType, deviceType)
+}
+
+func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
+	if spec.HostBinding == nil {
+		return nil // No destination
+	}
+
+	// Get memory - this handles both partitioned and non-partitioned cases
+	mem := kr.GetMemory(spec.Name)
+	if mem == nil {
+		return fmt.Errorf("no device memory allocated for %s", spec.Name)
+	}
+
+	// Handle partitioned data types ([][]T and []mat.Matrix formats)
+	if spec.IsPartitioned {
+		return kr.copyPartitionedDataFromDevice(spec, mem)
+	}
+
+	// Handle single matrix types specially
+	if matrix, ok := spec.HostBinding.(mat.Matrix); ok {
+		return kr.copyMatrixFromDevice(matrix, mem, spec.GetEffectiveType())
+	}
+
+	// Determine types for non-matrix, non-partitioned data
+	hostType := spec.DataType
+	deviceType := spec.GetEffectiveType()
+
+	// Calculate size based on device type
+	var elementSize int64
+	switch deviceType {
+	case builder.Float32, builder.INT32:
+		elementSize = 4
+	case builder.Float64, builder.INT64:
+		elementSize = 8
+	default:
+		elementSize = 8
+	}
+	totalSize := spec.Size * elementSize
+
+	if hostType == deviceType {
+		// No conversion needed
+		return kr.copyDirectFromDevice(spec.HostBinding, mem, totalSize)
+	}
+
+	// Type conversion needed
+	return kr.copyFromDeviceWithTypeConversion(mem, spec.HostBinding, deviceType, hostType, totalSize)
+}
+
 // copyPartitionedData handles partitioned data copy with optional type conversion
 func (kr *Runner) copyPartitionedData(spec *builder.ParamSpec, deviceMem *gocca.OCCAMemory) error {
 	offsets, err := kr.readPartitionOffsets(spec.Name)
@@ -69,10 +348,6 @@ func (kr *Runner) copyPartitionedDataFromDevice(spec *builder.ParamSpec, deviceM
 		return fmt.Errorf("unsupported partitioned type for copy back: %T", data)
 	}
 }
-
-// ============================================================================
-// Helper Methods - Eliminate Duplication
-// ============================================================================
 
 // Modified readPartitionOffsets in runner/kernel_copy.go
 func (kr *Runner) readPartitionOffsets(name string) ([]int64, error) {
@@ -447,289 +722,4 @@ func (kr *Runner) copyInt32PartitionsFromDevice(data [][]int32, deviceMem *gocca
 	}
 
 	return nil
-}
-
-// copyMatrixPartitionsFromDevice handles matrix partition copies from device
-func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *gocca.OCCAMemory,
-	offsets []int64, needsConversion bool, sourceType builder.DataType) error {
-
-	fmt.Printf("\n=== BEGIN copyMatrixPartitionsFromDevice DEBUG ===\n")
-	fmt.Printf("Num partitions: %d, needsConversion: %v, sourceType: %v\n",
-		kr.NumPartitions, needsConversion, sourceType)
-	fmt.Printf("Offsets: %v\n", offsets)
-
-	for i, matrix := range data {
-		if i >= kr.NumPartitions {
-			break
-		}
-
-		fmt.Printf("\nPartition %d:\n", i)
-		rows, cols := matrix.Dims()
-		fmt.Printf("  Matrix dims: %dx%d = %d elements\n", rows, cols, rows*cols)
-		size := rows * cols
-
-		if needsConversion && sourceType == builder.Float32 {
-			// Read as float32 and convert
-			temp := make([]float32, size)
-			partitionBytes := int64(size * 4)
-			offsetBytes := offsets[i] * 4
-
-			fmt.Printf("  Conversion path (float32 -> float64)\n")
-			fmt.Printf("  Partition bytes: %d\n", partitionBytes)
-			fmt.Printf("  Offset bytes: %d\n", offsetBytes)
-			fmt.Printf("  Calling CopyToWithOffset...\n")
-
-			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
-
-			fmt.Printf("  CopyToWithOffset succeeded\n")
-
-			// Type assert to mutable matrix
-			if m, ok := matrix.(*mat.Dense); ok {
-				// Convert and unpack
-				for r := 0; r < rows; r++ {
-					for c := 0; c < cols; c++ {
-						val := float64(temp[c*rows+r])
-						m.Set(r, c, val)
-					}
-				}
-			}
-		} else {
-			// Direct copy
-			flatData := make([]float64, size)
-			partitionBytes := int64(size * 8)
-			offsetBytes := offsets[i] * 8
-
-			fmt.Printf("  Direct copy path (no conversion)\n")
-			fmt.Printf("  Partition bytes: %d\n", partitionBytes)
-			fmt.Printf("  Offset bytes: %d\n", offsetBytes)
-			fmt.Printf("  Access range: [%d, %d)\n", offsetBytes, offsetBytes+partitionBytes)
-
-			// DEBUG: Check if we have a next offset to verify bounds
-			if i+1 < len(offsets) {
-				nextOffsetBytes := offsets[i+1] * 8
-				fmt.Printf("  Next partition starts at: %d bytes\n", nextOffsetBytes)
-				if offsetBytes+partitionBytes > nextOffsetBytes {
-					fmt.Printf("  *** WARNING: Would overrun into next partition! ***\n")
-				}
-			}
-
-			// This is where the error occurs
-			fmt.Printf("  Calling CopyToWithOffset...\n")
-			deviceMem.CopyToWithOffset(unsafe.Pointer(&flatData[0]), partitionBytes, offsetBytes)
-			fmt.Printf("  CopyToWithOffset succeeded\n")
-
-			// Type assert to mutable matrix
-			if m, ok := matrix.(*mat.Dense); ok {
-				// Unpack column-major data back into the Dense matrix
-				for r := 0; r < rows; r++ {
-					for c := 0; c < cols; c++ {
-						val := flatData[c*rows+r]
-						m.Set(r, c, val)
-					}
-				}
-			}
-		}
-		fmt.Printf("\n")
-	}
-
-	fmt.Printf("=== END copyMatrixPartitionsFromDevice DEBUG ===\n\n")
-	return nil
-}
-
-// copyMatrixToDevice copies a matrix to device with transposition
-// MODIFIED: Now takes explicit dataType parameter
-func (kr *Runner) copyMatrixToDevice(matrix mat.Matrix, mem *gocca.OCCAMemory, dataType builder.DataType) error {
-	rows, cols := matrix.Dims()
-	totalElements := rows * cols
-
-	if dataType == builder.Float64 {
-		// Transpose to column-major
-		transposed := make([]float64, totalElements)
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				transposed[j*rows+i] = matrix.At(i, j)
-			}
-		}
-		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
-	} else {
-		// Convert and transpose
-		transposed := make([]float32, totalElements)
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				transposed[j*rows+i] = float32(matrix.At(i, j))
-			}
-		}
-		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*4))
-	}
-	return nil
-}
-
-// copyMatrixFromDevice copies a matrix from device with transposition
-// MODIFIED: Now takes explicit dataType parameter
-func (kr *Runner) copyMatrixFromDevice(matrix mat.Matrix, mem *gocca.OCCAMemory, dataType builder.DataType) error {
-	// Type assert to get mutable matrix
-	m, ok := matrix.(*mat.Dense)
-	if !ok {
-		return fmt.Errorf("matrix must be *mat.Dense for copy back")
-	}
-
-	rows, cols := m.Dims()
-	totalElements := rows * cols
-
-	if dataType == builder.Float64 {
-		// Read column-major data
-		transposed := make([]float64, totalElements)
-		mem.CopyTo(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
-
-		// Transpose back to row-major
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				m.Set(i, j, transposed[j*rows+i])
-			}
-		}
-	} else {
-		// Read and convert
-		transposed := make([]float32, totalElements)
-		mem.CopyTo(unsafe.Pointer(&transposed[0]), int64(totalElements*4))
-
-		// Transpose and convert back
-		for i := 0; i < rows; i++ {
-			for j := 0; j < cols; j++ {
-				m.Set(i, j, float64(transposed[j*rows+i]))
-			}
-		}
-	}
-	return nil
-}
-
-// copyDirectToDevice performs direct copy to device without conversion
-func (kr *Runner) copyDirectToDevice(hostData interface{}, mem *gocca.OCCAMemory) error {
-	switch data := hostData.(type) {
-	case []float64:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-	case []float32:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
-	case []int32:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
-	case []int64:
-		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
-	case mat.Matrix:
-		// Need to determine the matrix type from metadata
-		// This will be called from copyToDeviceWithConversion which has the type info
-		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixToDevice directly")
-	// Add support for partitioned data types
-	case [][]float64, [][]float32, [][]int32, [][]int64, []mat.Matrix:
-		return fmt.Errorf("partitioned data requires special handling - use copyPartitionedData directly")
-	default:
-		return fmt.Errorf("unsupported type for direct copy: %T", data)
-	}
-	return nil
-}
-
-// copyDirectFromDevice performs direct copy from device without conversion
-func (kr *Runner) copyDirectFromDevice(hostData interface{}, mem *gocca.OCCAMemory, size int64) error {
-	switch data := hostData.(type) {
-	case []float64:
-		mem.CopyTo(unsafe.Pointer(&data[0]), size)
-	case []float32:
-		mem.CopyTo(unsafe.Pointer(&data[0]), size)
-	case []int32:
-		mem.CopyTo(unsafe.Pointer(&data[0]), size)
-	case []int64:
-		mem.CopyTo(unsafe.Pointer(&data[0]), size)
-	case mat.Matrix:
-		// Need to determine the matrix type from metadata
-		// This will be called from copyFromDeviceWithConversion which has the type info
-		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixFromDevice directly")
-	// Add support for partitioned data types
-	case [][]float64, [][]float32, [][]int32, [][]int64, []mat.Matrix:
-		return fmt.Errorf("partitioned data requires special handling - use copyPartitionedDataFromDevice directly")
-	default:
-		return fmt.Errorf("unsupported type for direct copy from device: %T", data)
-	}
-	return nil
-}
-
-// copyToDeviceWithConversion handles host→device transfers with optional type conversion
-// MODIFIED: Now uses ParamSpec to determine types and handles partitioned data
-func (kr *Runner) copyToDeviceWithConversion(spec *builder.ParamSpec) error {
-	if spec.HostBinding == nil {
-		return nil // Nothing to copy
-	}
-
-	// Get memory - this handles both partitioned and non-partitioned cases
-	mem := kr.GetMemory(spec.Name)
-	if mem == nil {
-		return fmt.Errorf("no device memory allocated for %s", spec.Name)
-	}
-
-	// Handle partitioned data types ([][]T format)
-	if spec.IsPartitioned {
-		return kr.copyPartitionedData(spec, mem)
-	}
-
-	// Handle matrix types specially
-	if matrix, ok := spec.HostBinding.(mat.Matrix); ok {
-		return kr.copyMatrixToDevice(matrix, mem, spec.GetEffectiveType())
-	}
-
-	// For non-matrix, non-partitioned types
-	hostType := spec.DataType
-	deviceType := spec.GetEffectiveType()
-
-	if hostType == deviceType {
-		// No conversion needed
-		return kr.copyDirectToDevice(spec.HostBinding, mem)
-	}
-
-	// Type conversion needed
-	return kr.copyWithTypeConversion(spec.HostBinding, mem, hostType, deviceType)
-}
-
-// copyFromDeviceWithConversion handles device→host transfers with optional type conversion
-// MODIFIED: Now uses ParamSpec to determine types and handles partitioned data
-func (kr *Runner) copyFromDeviceWithConversion(spec *builder.ParamSpec) error {
-	if spec.HostBinding == nil {
-		return nil // No destination
-	}
-
-	// Get memory - this handles both partitioned and non-partitioned cases
-	mem := kr.GetMemory(spec.Name)
-	if mem == nil {
-		return fmt.Errorf("no device memory allocated for %s", spec.Name)
-	}
-
-	// Handle partitioned data types ([][]T and []mat.Matrix formats)
-	if spec.IsPartitioned {
-		return kr.copyPartitionedDataFromDevice(spec, mem)
-	}
-
-	// Handle single matrix types specially
-	if matrix, ok := spec.HostBinding.(mat.Matrix); ok {
-		return kr.copyMatrixFromDevice(matrix, mem, spec.GetEffectiveType())
-	}
-
-	// Determine types for non-matrix, non-partitioned data
-	hostType := spec.DataType
-	deviceType := spec.GetEffectiveType()
-
-	// Calculate size based on device type
-	var elementSize int64
-	switch deviceType {
-	case builder.Float32, builder.INT32:
-		elementSize = 4
-	case builder.Float64, builder.INT64:
-		elementSize = 8
-	default:
-		elementSize = 8
-	}
-	totalSize := spec.Size * elementSize
-
-	if hostType == deviceType {
-		// No conversion needed
-		return kr.copyDirectFromDevice(spec.HostBinding, mem, totalSize)
-	}
-
-	// Type conversion needed
-	return kr.copyFromDeviceWithTypeConversion(mem, spec.HostBinding, deviceType, hostType, totalSize)
 }

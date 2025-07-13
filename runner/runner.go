@@ -5,6 +5,7 @@ import (
 	"github.com/notargets/DGKernel/runner/builder"
 	"github.com/notargets/gocca"
 	"gonum.org/v1/gonum/mat"
+	"sort"
 	"unsafe"
 )
 
@@ -14,6 +15,16 @@ type ArrayMetadata struct {
 	dataType  builder.DataType
 	isOutput  bool
 	paramSpec *builder.ParamSpec
+}
+
+// KernelArgument represents a single kernel argument with metadata
+type KernelArgument struct {
+	Name        string
+	Type        string // "int_t*", "real_t*"
+	MemoryKey   string // Key in PooledMemory map
+	IsConst     bool
+	Category    string // "system", "matrix", "array_data", "array_offset"
+	UserArgName string // For user arrays, the base name (e.g., "U" for "U_global")
 }
 
 // Runner orchestrates kernel compilation and execution with flexible parameter handling
@@ -64,6 +75,183 @@ func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
 	kMem := device.Malloc(int64(len(bld.K)*intSize), unsafe.Pointer(&bld.K[0]), nil)
 	kr.PooledMemory["K"] = kMem
 	return
+}
+
+func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
+	// NEW: Collect array types for preamble generation
+	arrayTypes := kr.collectArrayTypes()
+
+	// MODIFIED: Pass array types to GeneratePreamble
+	kr.Builder.GeneratePreamble(kr.GetAllocatedArrays(), arrayTypes)
+
+	// Combine preamble with kernel source
+	fullSource := kr.KernelPreamble + "\n" + kernelSource
+
+	// Build kernel with OpenMP optimization fix
+	var kernel *gocca.OCCAKernel
+	var err error
+
+	if kr.Device.Mode() == "OpenMP" {
+		// Workaround for OCCA bug: OpenMP doesn't get default -O3 flag
+		props := gocca.JsonParse(`{"compiler_flags": "-O3"}`)
+		defer props.Free()
+		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, props)
+	} else {
+		// Other devices work correctly with default flags
+		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, nil)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to build kernel %s: %w", kernelName, err)
+	}
+
+	// Register kernel
+	if kernel != nil {
+		kr.Kernels[kernelName] = kernel
+		return kernel, nil
+	}
+
+	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
+}
+
+func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
+	// Get kernel definition
+	def, exists := kr.kernelDefinitions[kernelName]
+	if !exists {
+		return fmt.Errorf("kernel %s not defined - use DefineKernel first", kernelName)
+	}
+
+	// Get compiled kernel
+	kernel, exists := kr.Kernels[kernelName]
+	if !exists {
+		return fmt.Errorf("kernel %s not compiled", kernelName)
+	}
+
+	// Validate offsets before kernel execution
+	for _, arrayName := range kr.GetAllocatedArrays() {
+		// Skip validation if this is a device matrix (stored without _global suffix)
+		if _, isDeviceMatrix := kr.DeviceMatrices[arrayName]; isDeviceMatrix {
+			continue
+		}
+		if err := kr.validateOffsets(arrayName, "before kernel "+kernelName); err != nil {
+			fmt.Printf("Pre-kernel validation failed: %v\n", err)
+		}
+	}
+
+	// Perform pre-kernel data copies (host→device)
+	if err := kr.performPreKernelCopies(def); err != nil {
+		return fmt.Errorf("pre-kernel copy failed: %w", err)
+	}
+
+	// Build kernel arguments
+	args, err := kr.buildKernelArguments(def, scalarValues)
+	if err != nil {
+		return fmt.Errorf("failed to build arguments: %w", err)
+	}
+
+	// Execute kernel
+	if err := kernel.RunWithArgs(args...); err != nil {
+		return fmt.Errorf("kernel execution failed: %w", err)
+	}
+
+	kr.Device.Finish()
+
+	// Validate offsets after kernel execution
+	for _, arrayName := range kr.GetAllocatedArrays() {
+		// Skip validation if this is a device matrix (stored without _global suffix)
+		if _, isDeviceMatrix := kr.DeviceMatrices[arrayName]; isDeviceMatrix {
+			continue
+		}
+		if err := kr.validateOffsets(arrayName, "after kernel "+kernelName); err != nil {
+			fmt.Printf("Post-kernel validation failed: %v\n", err)
+		}
+	}
+
+	// Perform post-kernel data copies (device→host)
+	if err := kr.performPostKernelCopies(def); err != nil {
+		return fmt.Errorf("post-kernel copy failed: %w", err)
+	}
+
+	return nil
+}
+
+// GetKernelArgumentsForDefinition returns kernel arguments using parameter specs
+func (kr *Runner) GetKernelArgumentsForDefinition(def *KernelDefinition) []KernelArgument {
+	var args []KernelArgument
+
+	// 1. K array is always first
+	args = append(args, KernelArgument{
+		Name:      "K",
+		Type:      "int_t*",
+		MemoryKey: "K",
+		IsConst:   true,
+		Category:  "system",
+	})
+
+	// 2. Device matrices in sorted order
+	var deviceMatrixParams []builder.ParamSpec
+	for _, p := range def.Parameters {
+		if p.IsMatrix && !p.IsStatic {
+			deviceMatrixParams = append(deviceMatrixParams, p)
+		}
+	}
+	// Sort by name for consistent ordering
+	sort.Slice(deviceMatrixParams, func(i, j int) bool {
+		return deviceMatrixParams[i].Name < deviceMatrixParams[j].Name
+	})
+
+	for _, p := range deviceMatrixParams {
+		args = append(args, KernelArgument{
+			Name:      p.Name,
+			Type:      "real_t*",
+			MemoryKey: p.Name,
+			IsConst:   true,
+			Category:  "matrix",
+		})
+	}
+
+	// 3. Arrays (non-matrix, non-scalar parameters)
+	for _, p := range def.Parameters {
+		if p.Direction == builder.DirectionScalar || p.IsMatrix {
+			continue // Skip scalars and matrices
+		}
+
+		// Global data pointer
+		args = append(args, KernelArgument{
+			Name:        p.Name + "_global",
+			Type:        "real_t*",
+			MemoryKey:   p.Name + "_global",
+			IsConst:     p.IsConst(),
+			Category:    "array_data",
+			UserArgName: p.Name,
+		})
+
+		// Offset array
+		args = append(args, KernelArgument{
+			Name:        p.Name + "_offsets",
+			Type:        "int_t*",
+			MemoryKey:   p.Name + "_offsets",
+			IsConst:     true,
+			Category:    "array_offset",
+			UserArgName: p.Name,
+		})
+	}
+
+	// 4. Scalars last
+	for _, p := range def.Parameters {
+		if p.Direction == builder.DirectionScalar {
+			typeStr := GetScalarTypeName(p.DataType)
+			args = append(args, KernelArgument{
+				Name:      p.Name,
+				Type:      typeStr,
+				MemoryKey: "", // Scalars don't have memory keys
+				IsConst:   true,
+				Category:  "scalar",
+			})
+		}
+	}
+
+	return args
 }
 
 // performPreKernelCopies handles all host→device transfers before kernel execution
@@ -165,7 +353,6 @@ func (kr *Runner) Free() {
 	}
 }
 
-// Modified allocateSingleArray in runner/runner.go
 func (kr *Runner) allocateSingleArray(spec builder.ArraySpec, paramSpec *builder.ParamSpec) error {
 
 	// Calculate aligned offsets and total size
@@ -253,7 +440,6 @@ func (kr *Runner) validateOffsets(name string, context string) error {
 	return nil
 }
 
-// Make matrix methods internal (lowercase first letter)
 func (kr *Runner) addStaticMatrix(name string, m mat.Matrix) {
 	kr.Builder.AddStaticMatrix(name, m)
 }
@@ -322,43 +508,6 @@ func (kr *Runner) buildKernelArguments(def *KernelDefinition, scalarValues []int
 	}
 
 	return args, nil
-}
-
-func (kr *Runner) BuildKernel(kernelSource, kernelName string) (*gocca.OCCAKernel, error) {
-	// NEW: Collect array types for preamble generation
-	arrayTypes := kr.collectArrayTypes()
-
-	// MODIFIED: Pass array types to GeneratePreamble
-	kr.Builder.GeneratePreamble(kr.GetAllocatedArrays(), arrayTypes)
-
-	// Combine preamble with kernel source
-	fullSource := kr.KernelPreamble + "\n" + kernelSource
-
-	// Build kernel with OpenMP optimization fix
-	var kernel *gocca.OCCAKernel
-	var err error
-
-	if kr.Device.Mode() == "OpenMP" {
-		// Workaround for OCCA bug: OpenMP doesn't get default -O3 flag
-		props := gocca.JsonParse(`{"compiler_flags": "-O3"}`)
-		defer props.Free()
-		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, props)
-	} else {
-		// Other devices work correctly with default flags
-		kernel, err = kr.Device.BuildKernelFromString(fullSource, kernelName, nil)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to build kernel %s: %w", kernelName, err)
-	}
-
-	// Register kernel
-	if kernel != nil {
-		kr.Kernels[kernelName] = kernel
-		return kernel, nil
-	}
-
-	return nil, fmt.Errorf("kernel build returned nil for %s", kernelName)
 }
 
 func (kr *Runner) generatePreambleWithTypes() string {
@@ -451,67 +600,4 @@ func (kr *Runner) collectArrayTypes() map[string]builder.DataType {
 	}
 
 	return arrayTypes
-}
-
-// In runner/runner.go, update RunKernel to skip offset validation for device matrices:
-
-func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
-	// Get kernel definition
-	def, exists := kr.kernelDefinitions[kernelName]
-	if !exists {
-		return fmt.Errorf("kernel %s not defined - use DefineKernel first", kernelName)
-	}
-
-	// Get compiled kernel
-	kernel, exists := kr.Kernels[kernelName]
-	if !exists {
-		return fmt.Errorf("kernel %s not compiled", kernelName)
-	}
-
-	// Validate offsets before kernel execution
-	for _, arrayName := range kr.GetAllocatedArrays() {
-		// Skip validation if this is a device matrix (stored without _global suffix)
-		if _, isDeviceMatrix := kr.DeviceMatrices[arrayName]; isDeviceMatrix {
-			continue
-		}
-		if err := kr.validateOffsets(arrayName, "before kernel "+kernelName); err != nil {
-			fmt.Printf("Pre-kernel validation failed: %v\n", err)
-		}
-	}
-
-	// Perform pre-kernel data copies (host→device)
-	if err := kr.performPreKernelCopies(def); err != nil {
-		return fmt.Errorf("pre-kernel copy failed: %w", err)
-	}
-
-	// Build kernel arguments
-	args, err := kr.buildKernelArguments(def, scalarValues)
-	if err != nil {
-		return fmt.Errorf("failed to build arguments: %w", err)
-	}
-
-	// Execute kernel
-	if err := kernel.RunWithArgs(args...); err != nil {
-		return fmt.Errorf("kernel execution failed: %w", err)
-	}
-
-	kr.Device.Finish()
-
-	// Validate offsets after kernel execution
-	for _, arrayName := range kr.GetAllocatedArrays() {
-		// Skip validation if this is a device matrix (stored without _global suffix)
-		if _, isDeviceMatrix := kr.DeviceMatrices[arrayName]; isDeviceMatrix {
-			continue
-		}
-		if err := kr.validateOffsets(arrayName, "after kernel "+kernelName); err != nil {
-			fmt.Printf("Post-kernel validation failed: %v\n", err)
-		}
-	}
-
-	// Perform post-kernel data copies (device→host)
-	if err := kr.performPostKernelCopies(def); err != nil {
-		return fmt.Errorf("post-kernel copy failed: %w", err)
-	}
-
-	return nil
 }

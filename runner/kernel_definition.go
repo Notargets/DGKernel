@@ -52,6 +52,69 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilde
 	return nil
 }
 
+func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
+	def, exists := kr.kernelDefinitions[kernelName]
+	if !exists {
+		return "", fmt.Errorf("kernel %s not defined", kernelName)
+	}
+
+	args := kr.GetKernelArgumentsForDefinition(def)
+	params := make([]string, 0, len(args))
+
+	for _, arg := range args {
+		if arg.Category == "scalar" {
+			// Scalars are passed by value
+			params = append(params, fmt.Sprintf("%s %s", arg.Type, arg.Name))
+		} else if arg.Category == "array_data" || arg.Category == "array_offset" {
+			// Find the parameter spec to get its type
+			var typeStr string
+			if arg.UserArgName != "" {
+				// Find the parameter that corresponds to this array
+				for _, p := range def.Parameters {
+					if p.Name == arg.UserArgName {
+						if arg.Category == "array_data" {
+							typeStr = kr.getParamTypeString(&p)
+						} else {
+							typeStr = "int_t" // offsets are always int_t
+						}
+						break
+					}
+				}
+			}
+
+			constStr := ""
+			if arg.IsConst {
+				constStr = "const "
+			}
+			params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
+		} else {
+			// System arrays (K) or matrices
+			constStr := ""
+			if arg.IsConst {
+				constStr = "const "
+			}
+
+			// For matrices, find their type from parameters
+			if arg.Category == "matrix" {
+				typeStr := "real_t" // default
+				for _, p := range def.Parameters {
+					if p.Name == arg.Name && p.IsMatrix {
+						typeStr = kr.getParamTypeString(&p)
+						break
+					}
+				}
+				params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
+			} else {
+				// System arrays already have the complete type including pointer
+				// arg.Type is already "int_t*" for K array, don't add another *
+				params = append(params, fmt.Sprintf("%s%s %s", constStr, arg.Type, arg.Name))
+			}
+		}
+	}
+
+	return strings.Join(params, ",\n\t"), nil
+}
+
 // processParameter handles allocation and setup for a single parameter
 func (kr *Runner) processParameter(spec *builder.ParamSpec) error {
 	// NEW: Validate partitioned data matches kernel configuration
@@ -266,71 +329,4 @@ func (kr *Runner) dataTypeToCType(dt builder.DataType) string {
 	default:
 		return "double" // fallback
 	}
-}
-
-// In runner/kernel_definition.go, update the GetKernelSignature method
-
-// GetKernelSignature generates the signature for a defined kernel
-// This now uses array-specific types instead of real_t
-func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
-	def, exists := kr.kernelDefinitions[kernelName]
-	if !exists {
-		return "", fmt.Errorf("kernel %s not defined", kernelName)
-	}
-
-	args := kr.GetKernelArgumentsForDefinition(def)
-	params := make([]string, 0, len(args))
-
-	for _, arg := range args {
-		if arg.Category == "scalar" {
-			// Scalars are passed by value
-			params = append(params, fmt.Sprintf("%s %s", arg.Type, arg.Name))
-		} else if arg.Category == "array_data" || arg.Category == "array_offset" {
-			// Find the parameter spec to get its type
-			var typeStr string
-			if arg.UserArgName != "" {
-				// Find the parameter that corresponds to this array
-				for _, p := range def.Parameters {
-					if p.Name == arg.UserArgName {
-						if arg.Category == "array_data" {
-							typeStr = kr.getParamTypeString(&p)
-						} else {
-							typeStr = "int_t" // offsets are always int_t
-						}
-						break
-					}
-				}
-			}
-
-			constStr := ""
-			if arg.IsConst {
-				constStr = "const "
-			}
-			params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
-		} else {
-			// System arrays (K) or matrices
-			constStr := ""
-			if arg.IsConst {
-				constStr = "const "
-			}
-
-			// For matrices, find their type from parameters
-			if arg.Category == "matrix" {
-				typeStr := "real_t" // default
-				for _, p := range def.Parameters {
-					if p.Name == arg.Name && p.IsMatrix {
-						typeStr = kr.getParamTypeString(&p)
-						break
-					}
-				}
-				params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
-			} else {
-				// System arrays already have the complete type including pointer
-				// arg.Type is already "int_t*" for K array, don't add another *
-				params = append(params, fmt.Sprintf("%s%s %s", constStr, arg.Type, arg.Name))
-			}
-		}
-	}
-
-	return strings.Join(params, ",\n\t"), nil
 }
