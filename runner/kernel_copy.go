@@ -363,66 +363,6 @@ func (kr *Runner) flattenMatrix(matrix mat.Matrix) []float64 {
 	return flat
 }
 
-// copyWithTypeConversion performs type conversion during device copy
-func (kr *Runner) copyWithTypeConversion(hostData interface{}, deviceMem *gocca.OCCAMemory,
-	fromType, toType builder.DataType) error {
-
-	switch fromType {
-	case builder.Float64:
-		if toType == builder.Float32 {
-			src := hostData.([]float64)
-			dst := make([]float32, len(src))
-			for i, v := range src {
-				dst[i] = float32(v)
-			}
-			deviceMem.CopyFrom(unsafe.Pointer(&dst[0]), int64(len(dst)*4))
-			return nil
-		}
-	case builder.Float32:
-		if toType == builder.Float64 {
-			src := hostData.([]float32)
-			dst := make([]float64, len(src))
-			for i, v := range src {
-				dst[i] = float64(v)
-			}
-			deviceMem.CopyFrom(unsafe.Pointer(&dst[0]), int64(len(dst)*8))
-			return nil
-		}
-	}
-
-	return fmt.Errorf("unsupported conversion from %v to %v", fromType, toType)
-}
-
-// copyFromDeviceWithTypeConversion performs type conversion during device→host copy
-func (kr *Runner) copyFromDeviceWithTypeConversion(deviceMem *gocca.OCCAMemory, hostData interface{},
-	fromType, toType builder.DataType, totalSize int64) error {
-
-	switch fromType {
-	case builder.Float32:
-		if toType == builder.Float64 {
-			temp := make([]float32, totalSize/4)
-			deviceMem.CopyTo(unsafe.Pointer(&temp[0]), totalSize)
-			dst := hostData.([]float64)
-			for i, v := range temp {
-				dst[i] = float64(v)
-			}
-			return nil
-		}
-	case builder.Float64:
-		if toType == builder.Float32 {
-			temp := make([]float64, totalSize/8)
-			deviceMem.CopyTo(unsafe.Pointer(&temp[0]), totalSize)
-			dst := hostData.([]float32)
-			for i, v := range temp {
-				dst[i] = float32(v)
-			}
-			return nil
-		}
-	}
-
-	return fmt.Errorf("unsupported conversion from %v to %v", fromType, toType)
-}
-
 // copyFloat64PartitionsToDevice handles float64 partition copies to device
 func (kr *Runner) copyFloat64PartitionsToDevice(data [][]float64, deviceMem *gocca.OCCAMemory,
 	offsets []int64, needsConversion bool, targetType builder.DataType) error {
