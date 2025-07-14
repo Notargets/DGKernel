@@ -6,6 +6,7 @@ package runner
 
 import (
 	"fmt"
+	"strings"
 )
 
 // KernelConfig represents the configuration for a specific kernel execution
@@ -182,8 +183,64 @@ func (pc *ParamConfig) NoCopy() *ParamConfig {
 }
 
 // GetSignature generates the kernel signature for a configuration
-func (kc *KernelConfig) GetSignature() (string, error) {
-	// This will be implemented in Phase 6 when we update kernel execution
-	// For now, return a placeholder
-	return "", fmt.Errorf("GetSignature not yet implemented - coming in Phase 6")
+func (kc *KernelConfig) GetSignature(runner *Runner) (string, error) {
+	return GetSignatureForConfig(kc, runner)
+}
+
+// GetSignatureForConfig is a helper that can be called from kernel_execution.go
+func GetSignatureForConfig(config *KernelConfig, runner *Runner) (string, error) {
+	args := runner.GetKernelArgumentsForConfig(config)
+	params := make([]string, 0, len(args))
+
+	for _, arg := range args {
+		if arg.Category == "scalar" {
+			// Scalars are passed by value
+			params = append(params, fmt.Sprintf("%s %s", arg.Type, arg.Name))
+		} else if arg.Category == "array_data" || arg.Category == "array_offset" {
+			// Find the binding to get its type
+			var typeStr string
+			if arg.UserArgName != "" {
+				// Find the parameter that corresponds to this array
+				for _, usage := range config.Parameters {
+					if usage.Binding.Name == arg.UserArgName {
+						if arg.Category == "array_data" {
+							typeStr = runner.dataTypeToCType(usage.Binding.DeviceType)
+						} else {
+							typeStr = "int_t" // offsets are always int_t
+						}
+						break
+					}
+				}
+			}
+
+			constStr := ""
+			if arg.IsConst {
+				constStr = "const "
+			}
+			params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
+		} else {
+			// System arrays (K) or matrices
+			constStr := ""
+			if arg.IsConst {
+				constStr = "const "
+			}
+
+			// For matrices, find their type from bindings
+			if arg.Category == "matrix" {
+				typeStr := "real_t" // default
+				for _, usage := range config.Parameters {
+					if usage.Binding.Name == arg.Name && usage.Binding.IsMatrix {
+						typeStr = runner.dataTypeToCType(usage.Binding.DeviceType)
+						break
+					}
+				}
+				params = append(params, fmt.Sprintf("%s%s* %s", constStr, typeStr, arg.Name))
+			} else {
+				// System arrays already have the complete type including pointer
+				params = append(params, fmt.Sprintf("%s%s %s", constStr, arg.Type, arg.Name))
+			}
+		}
+	}
+
+	return strings.Join(params, ",\n\t"), nil
 }
