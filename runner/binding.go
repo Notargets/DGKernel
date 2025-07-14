@@ -320,3 +320,157 @@ func (kr *Runner) HasBinding(name string) bool {
 	_, exists := kr.Bindings[name]
 	return exists
 }
+
+// AllocateDevice allocates device memory for all defined bindings
+// This is Phase 2 of the new API - allocate memory once
+func (kr *Runner) AllocateDevice() error {
+	if kr.IsAllocated {
+		return fmt.Errorf("device memory already allocated")
+	}
+
+	if len(kr.Bindings) == 0 {
+		return fmt.Errorf("no bindings defined - call DefineBindings first")
+	}
+
+	// Process each binding
+	for name, binding := range kr.Bindings {
+		// Skip scalars - they don't need device allocation
+		if binding.IsScalar {
+			continue
+		}
+
+		// Skip already allocated arrays (for compatibility during migration)
+		if _, exists := kr.PooledMemory[name+"_global"]; exists {
+			continue
+		}
+
+		// Allocate based on binding type
+		if binding.IsMatrix && binding.IsStatic {
+			if err := kr.addStaticMatrixFromBinding(binding); err != nil {
+				return fmt.Errorf("failed to add static matrix %s: %w", name, err)
+			}
+		} else if binding.IsMatrix && !binding.IsStatic {
+			if err := kr.addDeviceMatrixFromBinding(binding); err != nil {
+				return fmt.Errorf("failed to add device matrix %s: %w", name, err)
+			}
+		} else {
+			// Regular array or temp array
+			if err := kr.allocateArrayFromBinding(binding); err != nil {
+				return fmt.Errorf("failed to allocate array %s: %w", name, err)
+			}
+		}
+	}
+
+	// Allocate all device matrices that were added
+	if err := kr.AllocateDeviceMatrices(); err != nil {
+		return fmt.Errorf("failed to allocate device matrices: %w", err)
+	}
+
+	kr.IsAllocated = true
+	return nil
+}
+
+// allocateArrayFromBinding allocates an array from DeviceBinding
+func (kr *Runner) allocateArrayFromBinding(binding *DeviceBinding) error {
+	// Create array spec from binding
+	arraySpec := builder.ArraySpec{
+		Name:      binding.Name,
+		Size:      binding.Size * int64(binding.ElementSize),
+		DataType:  binding.DeviceType,
+		Alignment: binding.Alignment,
+		IsOutput:  binding.IsOutput,
+	}
+
+	// Store binding in host bindings map for compatibility
+	if binding.HostBinding != nil {
+		if kr.hostBindings == nil {
+			kr.hostBindings = make(map[string]interface{})
+		}
+		kr.hostBindings[binding.Name] = binding.HostBinding
+	}
+
+	// Allocate using existing infrastructure
+	if err := kr.allocateSingleArray(arraySpec, binding.ParamSpec); err != nil {
+		return err
+	}
+
+	// Store metadata
+	kr.arrayMetadata[binding.Name] = ArrayMetadata{
+		spec:      arraySpec,
+		dataType:  binding.DeviceType,
+		isOutput:  binding.IsOutput,
+		paramSpec: binding.ParamSpec,
+	}
+
+	return nil
+}
+
+// addStaticMatrixFromBinding adds a static matrix from DeviceBinding
+func (kr *Runner) addStaticMatrixFromBinding(binding *DeviceBinding) error {
+	var matrix mat.Matrix
+
+	switch data := binding.HostBinding.(type) {
+	case mat.Matrix:
+		matrix = data
+	case []float64:
+		if binding.Stride > 0 {
+			matrix = mat.NewDense(len(data)/binding.Stride, binding.Stride, data)
+		} else {
+			return fmt.Errorf("flat array requires stride for matrix conversion")
+		}
+	default:
+		return fmt.Errorf("invalid matrix binding type: %T", binding.HostBinding)
+	}
+
+	kr.Builder.AddStaticMatrix(binding.Name, matrix)
+
+	// Store metadata
+	rows, cols := matrix.Dims()
+	meta := ArrayMetadata{
+		spec: builder.ArraySpec{
+			Name:     binding.Name,
+			DataType: binding.DeviceType,
+			Size:     int64(rows * cols * binding.ElementSize),
+		},
+		dataType:  binding.DeviceType,
+		paramSpec: binding.ParamSpec,
+	}
+	kr.arrayMetadata[binding.Name] = meta
+
+	return nil
+}
+
+// addDeviceMatrixFromBinding adds a device matrix from DeviceBinding
+func (kr *Runner) addDeviceMatrixFromBinding(binding *DeviceBinding) error {
+	var matrix mat.Matrix
+
+	switch data := binding.HostBinding.(type) {
+	case mat.Matrix:
+		matrix = data
+	case []float64:
+		if binding.Stride > 0 {
+			matrix = mat.NewDense(len(data)/binding.Stride, binding.Stride, data)
+		} else {
+			return fmt.Errorf("flat array requires stride for matrix conversion")
+		}
+	default:
+		return fmt.Errorf("invalid matrix binding type: %T", binding.HostBinding)
+	}
+
+	kr.Builder.AddDeviceMatrix(binding.Name, matrix)
+
+	// Store metadata
+	rows, cols := matrix.Dims()
+	meta := ArrayMetadata{
+		spec: builder.ArraySpec{
+			Name:     binding.Name,
+			DataType: binding.DeviceType,
+			Size:     int64(rows * cols * binding.ElementSize),
+		},
+		dataType:  binding.DeviceType,
+		paramSpec: binding.ParamSpec,
+	}
+	kr.arrayMetadata[binding.Name] = meta
+
+	return nil
+}
