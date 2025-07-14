@@ -1,5 +1,5 @@
 // File: runner/kernel_definition.go
-// Complete replacement implementing Phase 1: Array-specific type support
+// Phase 7: Migration and Compatibility - Reimplement DefineKernel using new infrastructure
 
 package runner
 
@@ -7,17 +7,23 @@ import (
 	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
 	"gonum.org/v1/gonum/mat"
+	"sort"
 	"strings"
 )
 
 // KernelDefinition holds all information about a defined kernel
+// DEPRECATED: This struct will be removed in the next major version
 type KernelDefinition struct {
 	Name       string
 	Parameters []builder.ParamSpec
 }
 
-// DefineKernel defines a kernel with its parameters using the new API
+// DefineKernel defines a kernel with its parameters using the old API
+// DEPRECATED: Use DefineBindings + AllocateDevice + ConfigureKernel instead
 func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilder) error {
+	// Print deprecation warning
+	fmt.Printf("WARNING: DefineKernel is deprecated and will be removed. Use DefineBindings + AllocateDevice + ConfigureKernel instead.\n")
+
 	// Extract and validate parameter specifications
 	paramSpecs := make([]builder.ParamSpec, len(params))
 	for i, p := range params {
@@ -27,19 +33,66 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilde
 		}
 	}
 
-	// Process each parameter
-	for _, spec := range paramSpecs {
-		if err := kr.processParameter(&spec); err != nil {
-			return fmt.Errorf("failed to process parameter %s: %w", spec.Name, err)
+	// Phase 1: Define bindings using new infrastructure
+	if !kr.IsAllocated {
+		// Only define bindings if not already allocated
+		err := kr.DefineBindings(params...)
+		if err != nil {
+			return fmt.Errorf("failed to define bindings: %w", err)
+		}
+
+		// Phase 2: Allocate device memory
+		err = kr.AllocateDevice()
+		if err != nil {
+			return fmt.Errorf("failed to allocate device: %w", err)
+		}
+	} else {
+		// If already allocated, just update bindings for any new parameters
+		for _, p := range params {
+			spec := p.Spec
+			if kr.GetBinding(spec.Name) == nil {
+				// This is a new parameter, create binding
+				binding, err := kr.createBindingFromParam(&spec)
+				if err != nil {
+					return fmt.Errorf("failed to create binding for %s: %w", spec.Name, err)
+				}
+				kr.Bindings[spec.Name] = binding
+
+				// Process the parameter (allocate if needed)
+				if err := kr.processParameterFromBinding(binding); err != nil {
+					return fmt.Errorf("failed to process parameter %s: %w", spec.Name, err)
+				}
+			}
+		}
+
+		// Allocate any new device matrices
+		if err := kr.AllocateDeviceMatrices(); err != nil {
+			return fmt.Errorf("failed to allocate device matrices: %w", err)
 		}
 	}
 
-	// Allocate all device matrices that were added
-	if err := kr.AllocateDeviceMatrices(); err != nil {
-		return fmt.Errorf("failed to allocate device matrices: %w", err)
+	// Phase 3: Configure kernel using new infrastructure
+	paramConfigs := make([]*ParamConfig, 0, len(params))
+	for _, p := range params {
+		pc := kr.Param(p.Spec.Name)
+
+		// Apply actions based on old API flags
+		if p.Spec.NeedsCopyTo() {
+			pc = pc.CopyTo()
+		}
+		if p.Spec.NeedsCopyBack() {
+			pc = pc.CopyBack()
+		}
+
+		paramConfigs = append(paramConfigs, pc)
 	}
 
-	// Store kernel definition
+	_, err := kr.ConfigureKernel(kernelName, paramConfigs...)
+	if err != nil {
+		return fmt.Errorf("failed to configure kernel: %w", err)
+	}
+
+	// Store kernel definition for backward compatibility
 	if kr.kernelDefinitions == nil {
 		kr.kernelDefinitions = make(map[string]*KernelDefinition)
 	}
@@ -52,7 +105,42 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilde
 	return nil
 }
 
+// processParameterFromBinding processes a parameter using its binding
+// This is extracted from the old processParameter method
+func (kr *Runner) processParameterFromBinding(binding *DeviceBinding) error {
+	// Skip scalars - they don't need allocation
+	if binding.IsScalar {
+		return nil
+	}
+
+	// Skip if already allocated
+	if _, exists := kr.PooledMemory[binding.Name+"_global"]; exists {
+		return nil
+	}
+	if _, exists := kr.PooledMemory[binding.Name]; exists && binding.IsMatrix {
+		return nil
+	}
+
+	// Allocate based on binding type
+	if binding.IsMatrix && binding.IsStatic {
+		return kr.addStaticMatrixFromBinding(binding)
+	} else if binding.IsMatrix && !binding.IsStatic {
+		return kr.addDeviceMatrixFromBinding(binding)
+	} else {
+		// Regular array or temp array
+		return kr.allocateArrayFromBinding(binding)
+	}
+}
+
+// GetKernelSignature returns the kernel signature for backward compatibility
+// DEPRECATED: Use GetKernelSignatureForConfig instead
 func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
+	// Try new API first
+	if config, exists := kr.KernelConfigs[kernelName]; exists {
+		return config.GetSignature(kr)
+	}
+
+	// Fall back to old API
 	def, exists := kr.kernelDefinitions[kernelName]
 	if !exists {
 		return "", fmt.Errorf("kernel %s not defined", kernelName)
@@ -115,9 +203,127 @@ func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
 	return strings.Join(params, ",\n\t"), nil
 }
 
+// GetKernelArgumentsForDefinition is kept for backward compatibility
+// DEPRECATED: The new API uses GetKernelArgumentsForConfig
+func (kr *Runner) GetKernelArgumentsForDefinition(def *KernelDefinition) []KernelArgument {
+	var args []KernelArgument
+
+	// 1. K array is always first
+	args = append(args, KernelArgument{
+		Name:      "K",
+		Type:      "int_t*",
+		MemoryKey: "K",
+		IsConst:   true,
+		Category:  "system",
+	})
+
+	// 2. Device matrices in sorted order
+	var deviceMatrixParams []builder.ParamSpec
+	for _, p := range def.Parameters {
+		if p.IsMatrix && !p.IsStatic {
+			deviceMatrixParams = append(deviceMatrixParams, p)
+		}
+	}
+	// Sort by name for consistent ordering
+	sort.Slice(deviceMatrixParams, func(i, j int) bool {
+		return deviceMatrixParams[i].Name < deviceMatrixParams[j].Name
+	})
+
+	for _, p := range deviceMatrixParams {
+		args = append(args, KernelArgument{
+			Name:      p.Name,
+			Type:      "real_t*",
+			MemoryKey: p.Name,
+			IsConst:   true,
+			Category:  "matrix",
+		})
+	}
+
+	// 3. Arrays (non-matrix, non-scalar parameters)
+	for _, p := range def.Parameters {
+		if p.Direction == builder.DirectionScalar || p.IsMatrix {
+			continue // Skip scalars and matrices
+		}
+
+		// Global data pointer
+		args = append(args, KernelArgument{
+			Name:        p.Name + "_global",
+			Type:        "real_t*",
+			MemoryKey:   p.Name + "_global",
+			IsConst:     p.IsConst(),
+			Category:    "array_data",
+			UserArgName: p.Name,
+		})
+
+		// Offset array
+		args = append(args, KernelArgument{
+			Name:        p.Name + "_offsets",
+			Type:        "int_t*",
+			MemoryKey:   p.Name + "_offsets",
+			IsConst:     true,
+			Category:    "array_offset",
+			UserArgName: p.Name,
+		})
+	}
+
+	// 4. Scalars last
+	for _, p := range def.Parameters {
+		if p.Direction == builder.DirectionScalar {
+			typeStr := GetScalarTypeName(p.DataType)
+			args = append(args, KernelArgument{
+				Name:      p.Name,
+				Type:      typeStr,
+				MemoryKey: "", // Scalars don't have memory keys
+				IsConst:   true,
+				Category:  "scalar",
+			})
+		}
+	}
+
+	return args
+}
+
+// RunKernel executes a kernel using the old API
+// DEPRECATED: Use ExecuteKernel instead
+func (kr *Runner) RunKernel(kernelName string, scalarValues ...interface{}) error {
+	fmt.Printf("WARNING: RunKernel is deprecated and will be removed. Use ExecuteKernel instead.\n")
+
+	// Use the new ExecuteKernel method
+	return kr.ExecuteKernel(kernelName, scalarValues...)
+}
+
+// The following methods are kept for backward compatibility but are now internal helpers
+
+// performPreKernelCopies handles all host→device transfers before kernel execution
+// DEPRECATED: The new API uses executeCopyActions
+func (kr *Runner) performPreKernelCopies(def *KernelDefinition) error {
+	for _, param := range def.Parameters {
+		if param.NeedsCopyTo() {
+			if err := kr.copyToDeviceWithConversion(&param); err != nil {
+				return fmt.Errorf("failed to copy %s to device: %w", param.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// performPostKernelCopies handles all device→host transfers after kernel execution
+// DEPRECATED: The new API uses executeCopyActions
+func (kr *Runner) performPostKernelCopies(def *KernelDefinition) error {
+	for _, param := range def.Parameters {
+		if param.NeedsCopyBack() {
+			if err := kr.copyFromDeviceWithConversion(&param); err != nil {
+				return fmt.Errorf("failed to copy %s from device: %w", param.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
 // processParameter handles allocation and setup for a single parameter
+// DEPRECATED: The new API uses processParameterFromBinding
 func (kr *Runner) processParameter(spec *builder.ParamSpec) error {
-	// NEW: Validate partitioned data matches kernel configuration
+	// Validate partitioned data matches kernel configuration
 	if spec.IsPartitioned && !kr.IsPartitioned {
 		return fmt.Errorf("partitioned data %s provided to non-partitioned kernel", spec.Name)
 	}
@@ -131,6 +337,7 @@ func (kr *Runner) processParameter(spec *builder.ParamSpec) error {
 		return fmt.Errorf("partition count mismatch for %s: expected %d, got %d",
 			spec.Name, kr.NumPartitions, spec.PartitionCount)
 	}
+
 	switch spec.Direction {
 	case builder.DirectionScalar:
 		// Scalars don't need allocation, just type checking
@@ -161,7 +368,8 @@ func (kr *Runner) processParameter(spec *builder.ParamSpec) error {
 	}
 }
 
-// allocateTempArray allocates a device-only temporary array
+// Helper methods that are still used by the compatibility layer
+
 func (kr *Runner) allocateTempArray(spec *builder.ParamSpec) error {
 	// Create array spec with effective type
 	effectiveType := spec.GetEffectiveType()
@@ -176,7 +384,6 @@ func (kr *Runner) allocateTempArray(spec *builder.ParamSpec) error {
 	return kr.allocateSingleArray(arraySpec, spec)
 }
 
-// allocateArrayFromSpec allocates an array from parameter specification
 func (kr *Runner) allocateArrayFromSpec(spec *builder.ParamSpec) error {
 	// Determine effective type (considering conversion)
 	effectiveType := spec.GetEffectiveType()
@@ -211,7 +418,6 @@ func (kr *Runner) allocateArrayFromSpec(spec *builder.ParamSpec) error {
 	return nil
 }
 
-// verifyExistingAllocation checks if existing allocation is compatible
 func (kr *Runner) verifyExistingAllocation(spec *builder.ParamSpec) error {
 	meta, exists := kr.arrayMetadata[spec.Name]
 	if !exists {
@@ -247,7 +453,6 @@ func (kr *Runner) verifyExistingAllocation(spec *builder.ParamSpec) error {
 	return nil
 }
 
-// addStaticMatrixFromSpec adds a static matrix from parameter specification
 func (kr *Runner) addStaticMatrixFromSpec(spec *builder.ParamSpec) error {
 	var matrix mat.Matrix
 
@@ -278,7 +483,6 @@ func (kr *Runner) addStaticMatrixFromSpec(spec *builder.ParamSpec) error {
 	return nil
 }
 
-// addDeviceMatrixFromSpec adds a device matrix from parameter specification
 func (kr *Runner) addDeviceMatrixFromSpec(spec *builder.ParamSpec) error {
 	var matrix mat.Matrix
 
@@ -329,4 +533,13 @@ func (kr *Runner) dataTypeToCType(dt builder.DataType) string {
 	default:
 		return "double" // fallback
 	}
+}
+
+// These methods just forward to the Builder for backward compatibility
+func (kr *Runner) AddStaticMatrix(name string, m mat.Matrix) {
+	kr.Builder.AddStaticMatrix(name, m)
+}
+
+func (kr *Runner) AddDeviceMatrix(name string, m mat.Matrix) {
+	kr.Builder.AddDeviceMatrix(name, m)
 }
