@@ -568,3 +568,175 @@ func TestOCCAMemoryOperations(t *testing.T) {
 	}
 	t.Log("Memory operations work correctly")
 }
+
+// TestMultipleKernelDefinitions tests the specific pattern that's failing
+func TestMultipleKernelDefinitions(t *testing.T) {
+	device := utils.CreateTestDevice(true) // Force CUDA
+	defer device.Free()
+
+	if device.Mode() != "CUDA" {
+		t.Skip("This test is CUDA-specific")
+	}
+
+	runner := NewRunner(device, builder.Config{
+		K: []int{1},
+	})
+	defer runner.Free()
+
+	// Step 1: Define first kernel
+	t.Log("=== Step 1: Defining first kernel ===")
+	hostOutput1 := make([]float64, 1)
+	err := runner.DefineKernel("kernel1",
+		builder.Output("output1").Bind(hostOutput1).CopyBack(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define kernel1: %v", err)
+	}
+
+	// Check allocated arrays
+	arrays1 := runner.GetAllocatedArrays()
+	t.Logf("After kernel1 definition, allocated arrays: %v", arrays1)
+
+	// Check if memory was allocated
+	if mem := runner.GetMemory("output1"); mem == nil {
+		t.Error("Memory for output1 not allocated")
+	} else {
+		t.Log("Memory for output1: allocated")
+	}
+
+	// Build and run first kernel
+	signature1, _ := runner.GetKernelSignature("kernel1")
+	kernelSource1 := fmt.Sprintf(`
+@kernel void kernel1(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		double* output1 = output1_PART(part);
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				output1[i] = 111.0;
+			}
+		}
+	}
+}`, signature1)
+
+	_, err = runner.BuildKernel(kernelSource1, "kernel1")
+	if err != nil {
+		t.Fatalf("Failed to build kernel1: %v", err)
+	}
+
+	err = runner.RunKernel("kernel1")
+	if err != nil {
+		t.Fatalf("Failed to run kernel1: %v", err)
+	}
+
+	t.Logf("kernel1 result: output1[0] = %f (expected 111.0)", hostOutput1[0])
+	if hostOutput1[0] != 111.0 {
+		t.Error("kernel1 failed")
+	}
+
+	// Step 2: Define second kernel with different parameters
+	t.Log("\n=== Step 2: Defining second kernel ===")
+	hostOutput2 := make([]float64, 1)
+	hostDebug := make([]float64, 3)
+	alpha := 2.5
+
+	err = runner.DefineKernel("kernel2",
+		builder.Output("output2").Bind(hostOutput2).CopyBack(),
+		builder.Output("debug").Bind(hostDebug).CopyBack(),
+		builder.Scalar("alpha").Bind(alpha),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define kernel2: %v", err)
+	}
+
+	// Check allocated arrays after second kernel
+	arrays2 := runner.GetAllocatedArrays()
+	t.Logf("After kernel2 definition, allocated arrays: %v", arrays2)
+
+	// Check if new arrays were allocated
+	for _, name := range []string{"output2", "debug"} {
+		if mem := runner.GetMemory(name); mem == nil {
+			t.Errorf("Memory for %s not allocated", name)
+		} else {
+			t.Logf("Memory for %s: allocated", name)
+		}
+	}
+
+	// Print the kernel configuration to debug
+	if config, exists := runner.KernelConfigs["kernel2"]; exists {
+		t.Log("kernel2 configuration:")
+		for i, param := range config.Parameters {
+			t.Logf("  [%d] %s: IsScalar=%v, CopyTo=%v, CopyBack=%v",
+				i, param.Binding.Name, param.Binding.IsScalar,
+				param.HasAction(CopyTo), param.HasAction(CopyBack))
+		}
+	}
+
+	// Generate preamble to check macros
+	preamble := runner.GeneratePreamble(runner.GetAllocatedArrays(), runner.collectArrayTypes())
+
+	// Check for required macros
+	requiredMacros := []string{
+		"output2_PART(part)",
+		"debug_PART(part)",
+	}
+
+	t.Log("Checking for partition macros:")
+	for _, macro := range requiredMacros {
+		if strings.Contains(preamble, macro) {
+			t.Logf("  ✓ Found macro: %s", macro)
+		} else {
+			t.Errorf("  ✗ Missing macro: %s", macro)
+		}
+	}
+
+	// Build and run second kernel
+	signature2, _ := runner.GetKernelSignature("kernel2")
+	t.Logf("kernel2 signature:\n%s", signature2)
+
+	kernelSource2 := fmt.Sprintf(`
+@kernel void kernel2(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		double* output2 = output2_PART(part);
+		double* debug = debug_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				// Debug info
+				if (i == 0) {
+					debug[0] = 1.0;        // Kernel executed
+					debug[1] = alpha;      // Scalar value received
+					debug[2] = (double)K[part]; // K value
+				}
+				
+				output2[i] = alpha;
+			}
+		}
+	}
+}`, signature2)
+
+	_, err = runner.BuildKernel(kernelSource2, "kernel2")
+	if err != nil {
+		t.Fatalf("Failed to build kernel2: %v", err)
+	}
+
+	err = runner.RunKernel("kernel2")
+	if err != nil {
+		t.Fatalf("Failed to run kernel2: %v", err)
+	}
+
+	t.Log("\nkernel2 results:")
+	t.Logf("  debug[0] = %f (kernel executed, expected 1.0)", hostDebug[0])
+	t.Logf("  debug[1] = %f (alpha value, expected 2.5)", hostDebug[1])
+	t.Logf("  debug[2] = %f (K[part], expected 1.0)", hostDebug[2])
+	t.Logf("  output2[0] = %f (expected 2.5)", hostOutput2[0])
+
+	if hostDebug[0] != 1.0 {
+		t.Error("Kernel didn't execute")
+	}
+	if hostDebug[1] != alpha {
+		t.Error("Alpha value incorrect in kernel")
+	}
+	if hostOutput2[0] != alpha {
+		t.Error("Output value incorrect")
+	}
+}

@@ -50,7 +50,8 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilde
 		// If already allocated, just update bindings for any new parameters
 		for _, p := range params {
 			spec := p.Spec
-			if kr.GetBinding(spec.Name) == nil {
+			existingBinding := kr.GetBinding(spec.Name)
+			if existingBinding == nil {
 				// This is a new parameter, create binding
 				binding, err := kr.createBindingFromParam(&spec)
 				if err != nil {
@@ -62,6 +63,17 @@ func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilde
 				if err := kr.processParameterFromBinding(binding); err != nil {
 					return fmt.Errorf("failed to process parameter %s: %w", spec.Name, err)
 				}
+			} else {
+				// Parameter already exists - update the host binding if provided
+				if spec.HostBinding != nil {
+					existingBinding.HostBinding = spec.HostBinding
+					// Also update in hostBindings map for compatibility
+					if kr.hostBindings != nil {
+						kr.hostBindings[spec.Name] = spec.HostBinding
+					}
+				}
+				// Update the param spec reference
+				existingBinding.ParamSpec = &spec
 			}
 		}
 
