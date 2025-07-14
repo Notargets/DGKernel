@@ -7,6 +7,7 @@ import (
 	"gonum.org/v1/gonum/mat"
 	"math"
 	"testing"
+	"unsafe"
 )
 
 // ============================================================================
@@ -232,6 +233,110 @@ func TestRunner_CopySemantics(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestDebugMatrixCopy(t *testing.T) {
+	device := utils.CreateTestDevice(true) // Force CUDA
+	defer device.Free()
+
+	kp := NewRunner(device, builder.Config{K: []int{10}})
+	defer kp.Free()
+
+	// Create test data
+	hostData := make([]float64, 10)
+	for i := range hostData {
+		hostData[i] = float64(i)
+	}
+
+	// Create matrix from the slice
+	hostM := mat.NewDense(len(hostData), 1, hostData)
+
+	t.Logf("Initial hostData: %v", hostData)
+	t.Logf("Initial matrix data: %v", hostM.RawMatrix().Data)
+
+	// Define kernel
+	err := kp.DefineKernel("test",
+		builder.InOut("data").Bind(hostM).Copy(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define kernel: %v", err)
+	}
+
+	// Check what was allocated
+	t.Logf("Allocated arrays: %v", kp.GetAllocatedArrays())
+
+	// Check the binding
+	binding := kp.GetBinding("data")
+	if binding != nil {
+		t.Logf("Binding info:")
+		t.Logf("  Name: %s", binding.Name)
+		t.Logf("  IsMatrix: %v", binding.IsMatrix)
+		t.Logf("  Size: %d", binding.Size)
+		t.Logf("  HostType: %v", binding.HostType)
+		t.Logf("  DeviceType: %v", binding.DeviceType)
+	}
+
+	// Check memory allocation
+	mem := kp.GetMemory("data")
+	if mem == nil {
+		// Try without _global suffix if it's a matrix
+		if memDirect := kp.PooledMemory["data"]; memDirect != nil {
+			t.Log("Memory found at 'data' (matrix allocation)")
+			mem = memDirect
+		} else {
+			t.Fatal("No memory allocated for 'data'")
+		}
+	} else {
+		t.Log("Memory found at 'data_global' (array allocation)")
+	}
+
+	// Manually copy initial data to device to verify
+	testData := make([]float64, 10)
+	mem.CopyTo(unsafe.Pointer(&testData[0]), int64(10*8))
+	t.Logf("Device data after allocation: %v", testData)
+
+	// Build and run kernel
+	signature, _ := kp.GetKernelSignature("test")
+	t.Logf("Kernel signature:\n%s", signature)
+
+	kernelSource := fmt.Sprintf(`
+@kernel void test(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		double* data = data_PART(part);
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				data[i] = data[i] * 2.0;
+			}
+		}
+	}
+}`, signature)
+
+	_, err = kp.BuildKernel(kernelSource, "test")
+	if err != nil {
+		t.Fatalf("Failed to build kernel: %v", err)
+	}
+
+	// Run kernel
+	err = kp.RunKernel("test")
+	if err != nil {
+		t.Fatalf("Failed to run kernel: %v", err)
+	}
+
+	// Check device data after kernel
+	mem.CopyTo(unsafe.Pointer(&testData[0]), int64(10*8))
+	t.Logf("Device data after kernel: %v", testData)
+
+	// Check host data
+	t.Logf("Host data after kernel: %v", hostData)
+	t.Logf("Matrix data after kernel: %v", hostM.RawMatrix().Data)
+
+	// Check if the matrix and slice still share memory
+	hostData[0] = 999.0
+	if hostM.At(0, 0) == 999.0 {
+		t.Log("Matrix and slice still share underlying data")
+	} else {
+		t.Log("Matrix and slice NO LONGER share underlying data")
+	}
 }
 
 func TestRunner_PartitionCopy(t *testing.T) {

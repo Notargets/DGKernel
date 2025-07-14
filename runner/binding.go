@@ -262,6 +262,11 @@ func (kr *Runner) inferBindingTypes(binding *DeviceBinding, spec *builder.ParamS
 		binding.MatrixRows = rows
 		binding.MatrixCols = cols
 
+		// IMPORTANT: Only set IsMatrix if the spec says so
+		// This respects whether .ToMatrix() was called
+		binding.IsMatrix = spec.IsMatrix
+		binding.IsStatic = spec.IsStatic
+
 		binding.DeviceType = spec.GetEffectiveType()
 		if binding.DeviceType == 0 {
 			binding.DeviceType = binding.HostType

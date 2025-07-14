@@ -160,6 +160,10 @@ func (kr *Runner) copyMatrixFromDevice(matrix mat.Matrix, mem *gocca.OCCAMemory,
 	return nil
 }
 
+// File: runner/kernel_copy.go
+//
+// Updated copyDirectToDevice to handle matrices that are treated as arrays
+
 // copyDirectToDevice performs direct copy to device without conversion
 func (kr *Runner) copyDirectToDevice(hostData interface{}, mem *gocca.OCCAMemory) error {
 	switch data := hostData.(type) {
@@ -172,10 +176,41 @@ func (kr *Runner) copyDirectToDevice(hostData interface{}, mem *gocca.OCCAMemory
 	case []int64:
 		mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
 	case mat.Matrix:
-		// Need to determine the matrix type from metadata
-		// This will be called from copyToDeviceWithConversion which has the type info
-		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixToDevice directly")
-	// Add support for partitioned data types
+		// Handle matrix as a flat array when IsMatrix = false
+		// Extract the underlying data and copy it directly
+		rows, cols := data.Dims()
+		size := rows * cols
+
+		// Get the raw data - this works for *mat.Dense
+		if dense, ok := data.(*mat.Dense); ok {
+			rawData := dense.RawMatrix().Data
+			if len(rawData) == size {
+				// Direct copy of the underlying slice
+				mem.CopyFrom(unsafe.Pointer(&rawData[0]), int64(size*8))
+			} else {
+				// Need to create a contiguous copy
+				flatData := make([]float64, size)
+				idx := 0
+				for i := 0; i < rows; i++ {
+					for j := 0; j < cols; j++ {
+						flatData[idx] = data.At(i, j)
+						idx++
+					}
+				}
+				mem.CopyFrom(unsafe.Pointer(&flatData[0]), int64(size*8))
+			}
+		} else {
+			// For other matrix types, copy element by element
+			flatData := make([]float64, size)
+			idx := 0
+			for i := 0; i < rows; i++ {
+				for j := 0; j < cols; j++ {
+					flatData[idx] = data.At(i, j)
+					idx++
+				}
+			}
+			mem.CopyFrom(unsafe.Pointer(&flatData[0]), int64(size*8))
+		}
 	case [][]float64, [][]float32, [][]int32, [][]int64, []mat.Matrix:
 		return fmt.Errorf("partitioned data requires special handling - use copyPartitionedData directly")
 	default:
@@ -196,10 +231,35 @@ func (kr *Runner) copyDirectFromDevice(hostData interface{}, mem *gocca.OCCAMemo
 	case []int64:
 		mem.CopyTo(unsafe.Pointer(&data[0]), size)
 	case mat.Matrix:
-		// Need to determine the matrix type from metadata
-		// This will be called from copyFromDeviceWithConversion which has the type info
-		return fmt.Errorf("matrix copy requires explicit type - use copyMatrixFromDevice directly")
-	// Add support for partitioned data types
+		// Handle matrix as a flat array when IsMatrix = false
+		// We need to update the matrix with the data from device
+		if dense, ok := data.(*mat.Dense); ok {
+			rows, cols := dense.Dims()
+			totalElements := rows * cols
+
+			// Read data from device
+			flatData := make([]float64, totalElements)
+			mem.CopyTo(unsafe.Pointer(&flatData[0]), size)
+
+			// Update the matrix - this preserves the underlying data sharing
+			// if the matrix was created from a slice
+			rawMat := dense.RawMatrix()
+			if len(rawMat.Data) == totalElements && rawMat.Stride == cols {
+				// Can copy directly to underlying data
+				copy(rawMat.Data, flatData)
+			} else {
+				// Need to set element by element
+				idx := 0
+				for i := 0; i < rows; i++ {
+					for j := 0; j < cols; j++ {
+						dense.Set(i, j, flatData[idx])
+						idx++
+					}
+				}
+			}
+		} else {
+			return fmt.Errorf("matrix must be *mat.Dense for copy from device")
+		}
 	case [][]float64, [][]float32, [][]int32, [][]int64, []mat.Matrix:
 		return fmt.Errorf("partitioned data requires special handling - use copyPartitionedDataFromDevice directly")
 	default:
