@@ -349,23 +349,6 @@ func (kr *Runner) copyPartitionedDataFromDevice(spec *builder.ParamSpec, deviceM
 	}
 }
 
-// Modified readPartitionOffsets in runner/kernel_copy.go
-func (kr *Runner) readPartitionOffsets(name string) ([]int64, error) {
-	// First validate that device offsets haven't been corrupted
-	if err := kr.validateOffsets(name, "during read"); err != nil {
-		// Log the error but continue with host offsets
-		fmt.Printf("WARNING: %v\n", err)
-		fmt.Printf("Using host-cached offsets for %s\n", name)
-	}
-
-	// Always return the host-cached offsets (which we know are correct)
-	if offsets, exists := kr.hostOffsets[name]; exists {
-		return offsets, nil
-	}
-
-	return nil, fmt.Errorf("no host offsets found for %s", name)
-}
-
 // flattenMatrix converts a matrix to a flat array in column-major order
 func (kr *Runner) flattenMatrix(matrix mat.Matrix) []float64 {
 	rows, cols := matrix.Dims()

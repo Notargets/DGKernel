@@ -30,14 +30,19 @@ type KernelArgument struct {
 // Runner orchestrates kernel compilation and execution with flexible parameter handling
 type Runner struct {
 	*builder.Builder
-	IsPartitioned     bool // NEW: Track if this runner uses partitioned data
+	IsPartitioned     bool // Track if this runner uses partitioned data
 	Device            *gocca.OCCADevice
 	Kernels           map[string]*gocca.OCCAKernel
 	PooledMemory      map[string]*gocca.OCCAMemory
 	arrayMetadata     map[string]ArrayMetadata
 	kernelDefinitions map[string]*KernelDefinition
 	hostBindings      map[string]interface{} // Store host data bindings
-	hostOffsets       map[string][]int64     // NEW: Store host-side copy of offsets
+	hostOffsets       map[string][]int64     // Store host-side copy of offsets
+
+	// Phase 1: New fields for V2 API
+	Bindings      map[string]*DeviceBinding // All defined host↔device bindings
+	KernelConfigs map[string]*KernelConfig  // Kernel-specific configurations
+	IsAllocated   bool                      // Whether AllocateDevice has been called
 }
 
 // NewRunner creates a new Runner instance
@@ -69,7 +74,11 @@ func NewRunner(device *gocca.OCCADevice, Config builder.Config) (kr *Runner) {
 		kernelDefinitions: make(map[string]*KernelDefinition),
 		hostBindings:      make(map[string]interface{}),
 		IsPartitioned:     len(Config.K) > 1,
-		hostOffsets:       make(map[string][]int64), // NEW: Initialize host offset storage
+		hostOffsets:       make(map[string][]int64),
+		// Phase 1: Initialize new maps
+		Bindings:      make(map[string]*DeviceBinding),
+		KernelConfigs: make(map[string]*KernelConfig),
+		IsAllocated:   false,
 	}
 
 	kMem := device.Malloc(int64(len(bld.K)*intSize), unsafe.Pointer(&bld.K[0]), nil)
@@ -368,27 +377,22 @@ func (kr *Runner) allocateSingleArray(spec builder.ArraySpec, paramSpec *builder
 
 	var offsetMem *gocca.OCCAMemory
 	if intSize == 4 {
-		// Convert to int32 for Device
+		// Convert to int32
 		offsets32 := make([]int32, len(offsets))
 		for i, v := range offsets {
 			offsets32[i] = int32(v)
 		}
 		offsetMem = kr.Device.Malloc(offsetsSize, unsafe.Pointer(&offsets32[0]), nil)
 	} else {
+		// int64
 		offsetMem = kr.Device.Malloc(offsetsSize, unsafe.Pointer(&offsets[0]), nil)
 	}
 	kr.PooledMemory[spec.Name+"_offsets"] = offsetMem
 
-	// NEW: Store offsets on host for validation
-	kr.hostOffsets[spec.Name] = make([]int64, len(offsets))
-	copy(kr.hostOffsets[spec.Name], offsets)
+	// Store host-side copy of offsets
+	kr.hostOffsets[spec.Name] = offsets
 
-	// NEW: Immediate validation
-	if err := kr.validateOffsets(spec.Name, "after allocation"); err != nil {
-		return fmt.Errorf("offset corruption detected immediately after allocation: %w", err)
-	}
-
-	// Track allocation
+	// Store metadata with paramSpec reference
 	kr.arrayMetadata[spec.Name] = ArrayMetadata{
 		spec:      spec,
 		dataType:  spec.DataType,
@@ -399,36 +403,56 @@ func (kr *Runner) allocateSingleArray(spec builder.ArraySpec, paramSpec *builder
 	return nil
 }
 
-func (kr *Runner) validateOffsets(name string, context string) error {
-	// Get expected offsets from host storage
-	expectedOffsets, exists := kr.hostOffsets[name]
-	if !exists {
-		return fmt.Errorf("no host offsets found for %s", name)
+// readPartitionOffsets reads partition offsets from device memory
+func (kr *Runner) readPartitionOffsets(arrayName string) ([]int64, error) {
+	offsetMem := kr.GetOffsets(arrayName)
+	if offsetMem == nil {
+		return nil, fmt.Errorf("no offset memory allocated for %s", arrayName)
 	}
 
-	// Read offsets from device
-	offsetsMem := kr.PooledMemory[name+"_offsets"]
-	if offsetsMem == nil {
-		return fmt.Errorf("no device offsets found for %s", name)
-	}
+	numOffsets := kr.NumPartitions + 1
+	intSize := kr.GetIntSize()
 
-	var actualOffsets []int64
-	if kr.GetIntSize() == 4 {
-		offsets32 := make([]int32, len(expectedOffsets))
-		offsetsMem.CopyTo(unsafe.Pointer(&offsets32[0]), int64(len(offsets32)*4))
-		actualOffsets = make([]int64, len(offsets32))
+	offsets := make([]int64, numOffsets)
+	if intSize == 4 {
+		// Read as int32 and convert
+		offsets32 := make([]int32, numOffsets)
+		offsetMem.CopyTo(unsafe.Pointer(&offsets32[0]), int64(numOffsets*4))
 		for i, v := range offsets32 {
-			actualOffsets[i] = int64(v)
+			offsets[i] = int64(v)
 		}
 	} else {
-		actualOffsets = make([]int64, len(expectedOffsets))
-		offsetsMem.CopyTo(unsafe.Pointer(&actualOffsets[0]), int64(len(actualOffsets)*8))
+		// Read directly as int64
+		offsetMem.CopyTo(unsafe.Pointer(&offsets[0]), int64(numOffsets*8))
 	}
 
-	// Compare offsets
+	return offsets, nil
+}
+
+// validateOffsets verifies that the offsets stored on device match what we expect
+func (kr *Runner) validateOffsets(name string, context string) error {
+	// Get the expected offsets from our host-side storage
+	expectedOffsets, exists := kr.hostOffsets[name]
+	if !exists {
+		// Skip validation if we don't have host offsets (e.g., for device matrices)
+		return nil
+	}
+
+	// Read actual offsets from device
+	actualOffsets, err := kr.readPartitionOffsets(name)
+	if err != nil {
+		return fmt.Errorf("failed to read offsets from device: %w", err)
+	}
+
+	// Compare
+	if len(actualOffsets) != len(expectedOffsets) {
+		return fmt.Errorf("offset count mismatch: expected %d, got %d",
+			len(expectedOffsets), len(actualOffsets))
+	}
+
 	for i := range expectedOffsets {
-		if expectedOffsets[i] != actualOffsets[i] {
-			fmt.Printf("\n!!! OFFSET CORRUPTION DETECTED for %s %s !!!\n", name, context)
+		if actualOffsets[i] != expectedOffsets[i] {
+			fmt.Printf("OFFSET CORRUPTION DETECTED for %s %s !!!\n", name, context)
 			fmt.Printf("Offset[%d]: expected %d, got %d\n", i, expectedOffsets[i], actualOffsets[i])
 			fmt.Printf("Expected offsets: %v\n", expectedOffsets)
 			fmt.Printf("Actual offsets: %v\n", actualOffsets)
