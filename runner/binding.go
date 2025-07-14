@@ -1,10 +1,14 @@
 // File: runner/binding.go
 // Phase 1: Foundation - Define DeviceBinding structure and ActionFlags
+// Phase 2: Binding System - Implement DefineBindings and helper methods
 
 package runner
 
 import (
+	"fmt"
 	"github.com/notargets/DGKernel/runner/builder"
+	"gonum.org/v1/gonum/mat"
+	"reflect"
 )
 
 // ActionFlags represents the memory operations to perform for a parameter
@@ -81,4 +85,238 @@ func (pu *ParameterUsage) NeedsCopyTo() bool {
 // NeedsCopyBack returns true if this usage requires device→host copy
 func (pu *ParameterUsage) NeedsCopyBack() bool {
 	return pu.HasAction(CopyBack)
+}
+
+// DefineBindings establishes host↔device data relationships
+// This is Phase 1 of the new API - define all bindings once
+func (kr *Runner) DefineBindings(params ...*builder.ParamBuilder) error {
+	if kr.IsAllocated {
+		return fmt.Errorf("bindings cannot be defined after AllocateDevice has been called")
+	}
+
+	// Extract and validate parameter specifications
+	for i, p := range params {
+		spec := p.Spec
+		if err := spec.Validate(); err != nil {
+			return fmt.Errorf("parameter %d: %w", i, err)
+		}
+
+		// Create DeviceBinding from ParamSpec
+		binding, err := kr.createBindingFromParam(&spec)
+		if err != nil {
+			return fmt.Errorf("failed to create binding for %s: %w", spec.Name, err)
+		}
+
+		// Store the binding
+		kr.Bindings[spec.Name] = binding
+	}
+
+	return nil
+}
+
+// createBindingFromParam converts a ParamSpec into a DeviceBinding
+// This extracts and refactors logic from DefineKernel
+func (kr *Runner) createBindingFromParam(spec *builder.ParamSpec) (*DeviceBinding, error) {
+	binding := &DeviceBinding{
+		Name:        spec.Name,
+		HostBinding: spec.HostBinding,
+		ParamSpec:   spec,
+		Alignment:   spec.Alignment,
+		IsOutput:    !spec.IsConst(),
+	}
+
+	// Set direction-based flags
+	switch spec.Direction {
+	case builder.DirectionScalar:
+		binding.IsScalar = true
+		binding.HostType = spec.DataType
+		binding.DeviceType = spec.DataType // Scalars don't convert
+		binding.Size = 1
+		binding.ElementSize = int(SizeOfType(binding.DeviceType))
+		return binding, nil
+
+	case builder.DirectionTemp:
+		binding.IsTemp = true
+		binding.DeviceType = spec.GetEffectiveType()
+		binding.Size = spec.Size
+		binding.ElementSize = int(SizeOfType(binding.DeviceType))
+		return binding, nil
+	}
+
+	// Handle matrix flags
+	binding.IsMatrix = spec.IsMatrix
+	binding.IsStatic = spec.IsStatic
+	binding.MatrixRows = spec.MatrixRows
+	binding.MatrixCols = spec.MatrixCols
+	binding.Stride = spec.Stride
+
+	// Handle partitioned data
+	binding.IsPartitioned = spec.IsPartitioned
+	binding.PartitionCount = spec.PartitionCount
+
+	// Infer types from host binding
+	if spec.HostBinding != nil {
+		if err := kr.inferBindingTypes(binding, spec); err != nil {
+			return nil, err
+		}
+	} else {
+		// No host binding - use spec types directly
+		binding.HostType = spec.DataType
+		binding.DeviceType = spec.GetEffectiveType()
+		binding.Size = spec.Size
+	}
+
+	// Set element size based on device type
+	binding.ElementSize = int(SizeOfType(binding.DeviceType))
+
+	// Validate partitioned data constraints
+	if binding.IsPartitioned {
+		if !kr.IsPartitioned {
+			return nil, fmt.Errorf("partitioned data %s provided to non-partitioned kernel", spec.Name)
+		}
+		if binding.PartitionCount != kr.NumPartitions {
+			return nil, fmt.Errorf("partition count mismatch for %s: expected %d, got %d",
+				spec.Name, kr.NumPartitions, binding.PartitionCount)
+		}
+	} else if kr.IsPartitioned && !binding.IsMatrix && !binding.IsScalar && !binding.IsTemp {
+		return nil, fmt.Errorf("non-partitioned array %s provided to partitioned kernel", spec.Name)
+	}
+
+	return binding, nil
+}
+
+// inferBindingTypes determines host and device types from the host binding
+func (kr *Runner) inferBindingTypes(binding *DeviceBinding, spec *builder.ParamSpec) error {
+	v := reflect.ValueOf(binding.HostBinding)
+	t := v.Type()
+
+	// Handle partitioned arrays ([][]T)
+	if t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Slice {
+		binding.IsPartitioned = true
+		binding.PartitionCount = v.Len()
+
+		// Calculate total size and get element type
+		totalSize := int64(0)
+		binding.PartitionSizes = make([]int, binding.PartitionCount)
+
+		for i := 0; i < v.Len(); i++ {
+			partition := v.Index(i)
+			partSize := partition.Len()
+			binding.PartitionSizes[i] = partSize
+			totalSize += int64(partSize)
+		}
+
+		binding.Size = totalSize
+
+		// Infer element type from first partition
+		if v.Len() > 0 {
+			elemType := t.Elem().Elem()
+			binding.HostType = getDataTypeFromReflectKind(elemType.Kind())
+		}
+
+		// Device type may differ if conversion specified
+		binding.DeviceType = spec.GetEffectiveType()
+		if binding.DeviceType == 0 {
+			binding.DeviceType = binding.HostType
+		}
+
+		return nil
+	}
+
+	// Handle partitioned matrices ([]mat.Matrix)
+	if t.Kind() == reflect.Slice && v.Len() > 0 {
+		if _, ok := v.Index(0).Interface().(mat.Matrix); ok {
+			binding.IsPartitioned = true
+			binding.IsMatrix = true
+			binding.PartitionCount = v.Len()
+
+			// Calculate total size
+			totalSize := int64(0)
+			for i := 0; i < v.Len(); i++ {
+				if m, ok := v.Index(i).Interface().(mat.Matrix); ok {
+					rows, cols := m.Dims()
+					if i == 0 {
+						binding.MatrixRows = rows
+						binding.MatrixCols = cols
+					}
+					totalSize += int64(rows * cols)
+				}
+			}
+
+			binding.Size = totalSize
+			binding.HostType = builder.Float64 // gonum matrices are float64
+			binding.DeviceType = spec.GetEffectiveType()
+			if binding.DeviceType == 0 {
+				binding.DeviceType = binding.HostType
+			}
+
+			return nil
+		}
+	}
+
+	// Handle single matrix
+	if m, ok := binding.HostBinding.(mat.Matrix); ok {
+		rows, cols := m.Dims()
+		binding.Size = int64(rows * cols)
+		binding.HostType = builder.Float64 // gonum matrices are float64
+		binding.MatrixRows = rows
+		binding.MatrixCols = cols
+
+		binding.DeviceType = spec.GetEffectiveType()
+		if binding.DeviceType == 0 {
+			binding.DeviceType = binding.HostType
+		}
+
+		return nil
+	}
+
+	// Handle regular slices
+	if t.Kind() == reflect.Slice {
+		binding.Size = int64(v.Len())
+
+		// Infer element type
+		elemType := t.Elem()
+		binding.HostType = getDataTypeFromReflectKind(elemType.Kind())
+
+		binding.DeviceType = spec.GetEffectiveType()
+		if binding.DeviceType == 0 {
+			binding.DeviceType = binding.HostType
+		}
+
+		return nil
+	}
+
+	// Handle scalars
+	binding.HostType = getDataTypeFromReflectKind(t.Kind())
+	binding.DeviceType = binding.HostType // Scalars don't convert
+	binding.Size = 1
+
+	return nil
+}
+
+// getDataTypeFromReflectKind converts reflect.Kind to builder.DataType
+func getDataTypeFromReflectKind(kind reflect.Kind) builder.DataType {
+	switch kind {
+	case reflect.Float32:
+		return builder.Float32
+	case reflect.Float64:
+		return builder.Float64
+	case reflect.Int32:
+		return builder.INT32
+	case reflect.Int, reflect.Int64:
+		return builder.INT64
+	default:
+		return builder.Float64 // Default
+	}
+}
+
+// GetBinding returns a binding by name
+func (kr *Runner) GetBinding(name string) *DeviceBinding {
+	return kr.Bindings[name]
+}
+
+// HasBinding checks if a binding exists
+func (kr *Runner) HasBinding(name string) bool {
+	_, exists := kr.Bindings[name]
+	return exists
 }
