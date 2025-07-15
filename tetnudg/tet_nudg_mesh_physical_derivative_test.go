@@ -191,6 +191,51 @@ func TestTetNudgArrayReturn(t *testing.T) {
 	}
 }
 
+func CreateTestSolutionPolynomial(tn *TetNudgMesh) (U *mat.Dense) {
+	var (
+		order = 2
+		Np    = tn.Np
+		Ktot  = tn.K
+	)
+	// Create test matrices for computation
+	// Note that these result in a storage of the answers in row-major format
+	U = mat.NewDense(Np, Ktot, nil)
+	fOrder := float64(order)
+	for K := 0; K < Ktot; K++ {
+		for j := 0; j < Np; j++ {
+			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
+			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
+			U.Set(j, K, xP+yP+zP)
+		}
+	}
+	return
+}
+
+func CreateTestSolutionPolynomialDerivative(U mat.Matrix,
+	tn *TetNudgMesh) (DuDx, DuDy, DuDz *mat.Dense) {
+	var (
+		order = 2
+		Np    = tn.Np
+		Ktot  = tn.K
+	)
+	DuDx = mat.NewDense(Np, Ktot, nil)
+	DuDy = mat.NewDense(Np, Ktot, nil)
+	DuDz = mat.NewDense(Np, Ktot, nil)
+	fOrder := float64(order)
+	for K := 0; K < Ktot; K++ {
+		for j := 0; j < Np; j++ {
+			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
+			dxP := float64(fOrder) * math.Pow(x, fOrder-1)
+			dyP := float64(fOrder) * math.Pow(y, fOrder-1)
+			dzP := float64(fOrder) * math.Pow(z, fOrder-1)
+			DuDx.Set(j, K, dxP)
+			DuDy.Set(j, K, dyP)
+			DuDz.Set(j, K, dzP)
+		}
+	}
+	return
+}
+
 func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	order := 2
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
@@ -200,7 +245,6 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	props := tn.GetProperties()
 
 	device := utils.CreateTestDevice()
-	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
 	k := []int{Ktot}
@@ -209,26 +253,8 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	})
 	defer kp.Free()
 
-	// Collect all matrices into param builders
-	matrices := tn.GetRefMatrices()
-	params := make([]*builder.ParamBuilder, 0, len(matrices)+2)
-
-	// Add matrices as parameters
-	for name, mat := range matrices {
-		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
-	}
-
-	// Use all host side matrix based computations.
-	// Note that these result in a storage of the answers in row-major format
-	U := mat.NewDense(Np, Ktot, nil)
-	fOrder := float64(order)
-	for K := 0; K < Ktot; K++ {
-		for j := 0; j < Np; j++ {
-			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
-			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
-			U.Set(j, K, xP+yP+zP)
-		}
-	}
+	// Calculate expected result on host
+	U := CreateTestSolutionPolynomial(tn)
 	var Ur mat.Dense
 	Ur.Mul(tn.Dr, U)
 	// DxH is the host calculated value to be compared with the device value
@@ -238,27 +264,61 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 			DxH.Set(j, K, tn.Rx.At(j, K)*Ur.At(j, K))
 		}
 	}
+	// Collect all element matrices
+	matrices := tn.GetRefMatrices()
 
-	Dx := mat.NewDense(Np, Ktot, nil)
+	// Phase 1: Define all bindings (once)
+	params := make([]*builder.ParamBuilder, 0, len(matrices)+4)
+
+	// Add basic element matrices as parameters - these will be allocated as
+	// device matrices
+	for name, mat := range matrices {
+		fmt.Printf("Matrix name: %s\n", name)
+		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
+	}
 	// Add array parameters
+	// IMPORTANT: We bind matrices without .ToMatrix() so they are treated as regular arrays
+	// This means they WILL be automatically transposed during copy operations
+	// Output matrix
+	Dx := mat.NewDense(Np, Ktot, nil)
 	params = append(params,
-		// Since U and Rx are matrices, they will be transposed on CopyTo()
-		builder.Input("U").Bind(U).CopyTo(),
-		builder.Input("Rx").Bind(tn.Rx).CopyTo(),
-		// Since Dx is a matrix, it will be transposed on CopyBack()
-		builder.Output("Dx").Bind(Dx).CopyBack(),
+		builder.Input("U").Bind(U),      // Will be transposed on CopyTo
+		builder.Input("Rx").Bind(tn.Rx), // Will be transposed on CopyTo
+		builder.Output("Dx").Bind(Dx),   // Will be transposed on CopyBack
 		builder.Temp("Ur").Type(builder.Float64).Size(totalNodes),
 	)
 
-	// Define kernel with all parameters
-	kernelName := "differentiate"
-	err := kp.DefineKernel(kernelName, params...)
+	// Define all bindings
+	err := kp.DefineBindings(params...)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 2: Allocate device memory (once)
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 3: Configure kernel for execution
+	kernelName := "differentiate"
+	config, err := kp.ConfigureKernel(kernelName,
+		kp.Param("U").CopyTo(),          // Copy and transpose to column-major
+		kp.Param("Rx").CopyTo(),         // Copy and transpose to column-major
+		kp.Param("Dx").CopyBack(),       // Copy back and transpose to row-major
+		kp.Param("Dr_"+props.ShortName), // Bind the backing array for the MATMUL macro
+		kp.Param("Ur"),                  // Temp array, no copy needed
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
 	}
 
 	// Get signature and build kernel
-	signature, _ := kp.GetKernelSignature(kernelName)
+	signature, err := config.GetSignature(kp)
+	if err != nil {
+		t.Fatalf("Failed to get signature: %v", err)
+	}
+
 	kernelSource := fmt.Sprintf(`
 #define NP %d
 
@@ -270,19 +330,21 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 
         double* Dx = Dx_PART(part);
         const double* Rx = Rx_PART(part);
-		// Single partition means we can safely use KpartMax as K[part]
+        // Single partition means we can safely use KpartMax as K[part]
         // ************************************************************
-		// *** This computation is happening in column-major format ***
+        // *** This computation is happening in column-major format ***
         // ************************************************************
         for (int n = 0; n < NP; ++n; @inner) {
             for (int k = 0; k < KpartMax; ++k) {
                 int i = n + k*NP;  // Column-major indexing
                 if (k < K[part]) {  // Bounds check for partition size
-			// DxH.Set(j, K, tn.Rx.At(j, K)*Ur.At(j, K))
-			Dx[i] = Rx[i]*Ur[i];
-		} } }
+                    // DxH.Set(j, K, tn.Rx.At(j, K)*Ur.At(j, K))
+                    Dx[i] = Rx[i]*Ur[i];
+                }
+            }
+        }
         // ************************************************************
-		// *** When Dx is copied back to host, it will be transposed **
+        // *** When Dx is copied back to host, it will be transposed **
         // ************************************************************
     }
 }
@@ -292,16 +354,15 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
-	// Execute differentiation
-	err = kp.RunKernel(kernelName)
+
+	// Execute kernel with automatic memory operations
+	err = kp.ExecuteKernel(kernelName)
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
 	// Dx is now in row-major format and can be compared directly to the host
 	// matrix result
-	// fmt.Println(Dx)
-	// os.Exit(1)
 	assert.InDeltaSlicef(t, DxH.RawMatrix().Data, Dx.RawMatrix().Data, 1.e-8, "")
 }
 
@@ -332,24 +393,9 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 		params = append(params, builder.Input(name).Bind(mat).ToMatrix())
 	}
 
-	U := mat.NewDense(Np, Ktot, nil)
-	DuDxExpected := mat.NewDense(Np, Ktot, nil)
-	DuDyExpected := mat.NewDense(Np, Ktot, nil)
-	DuDzExpected := mat.NewDense(Np, Ktot, nil)
-	fOrder := float64(order)
-	for K := 0; K < Ktot; K++ {
-		for j := 0; j < Np; j++ {
-			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
-			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
-			U.Set(j, K, xP+yP+zP)
-			dxP := float64(fOrder) * math.Pow(x, fOrder-1)
-			dyP := float64(fOrder) * math.Pow(y, fOrder-1)
-			dzP := float64(fOrder) * math.Pow(z, fOrder-1)
-			DuDxExpected.Set(j, K, dxP)
-			DuDyExpected.Set(j, K, dyP)
-			DuDzExpected.Set(j, K, dzP)
-		}
-	}
+	U := CreateTestSolutionPolynomial(tn)
+	DuDxExpected, DuDyExpected, DuDzExpected :=
+		CreateTestSolutionPolynomialDerivative(U, tn)
 
 	// Use matrices for the host output to get the automatic conversion to
 	// row-major storage format
@@ -705,7 +751,6 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	order := 4
 	tn := NewTetNudgMesh(order, "cube-partitioned.neu")
 	Ktot := tn.K
-	Np := tn.Np
 	k := make([]int, 0)
 	if len(tn.Mesh.EToP) != 0 {
 		// Count elements per partition
@@ -740,24 +785,9 @@ func TestTetNudgPhysicalDerivativePartitionedMesh(t *testing.T) {
 	}
 	fmt.Printf("Partition K: %v\n", k)
 
-	Uw := mat.NewDense(Np, Ktot, nil)
-	DuDxExpected := mat.NewDense(Np, Ktot, nil)
-	DuDyExpected := mat.NewDense(Np, Ktot, nil)
-	DuDzExpected := mat.NewDense(Np, Ktot, nil)
-	fOrder := float64(order)
-	for K := 0; K < Ktot; K++ {
-		for j := 0; j < Np; j++ {
-			x, y, z := tn.X.At(j, K), tn.Y.At(j, K), tn.Z.At(j, K)
-			xP, yP, zP := math.Pow(x, fOrder), math.Pow(y, fOrder), math.Pow(z, fOrder)
-			Uw.Set(j, K, xP+yP+zP)
-			dxP := float64(fOrder) * math.Pow(x, fOrder-1)
-			dyP := float64(fOrder) * math.Pow(y, fOrder-1)
-			dzP := float64(fOrder) * math.Pow(z, fOrder-1)
-			DuDxExpected.Set(j, K, dxP)
-			DuDyExpected.Set(j, K, dyP)
-			DuDzExpected.Set(j, K, dzP)
-		}
-	}
+	Uw := CreateTestSolutionPolynomial(tn)
+	DuDxExpected, DuDyExpected, DuDzExpected :=
+		CreateTestSolutionPolynomialDerivative(Uw, tn)
 
 	DuDxH, DuDyH, DuDzH := calcPhysicalDerivative(Uw, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
 		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
