@@ -248,9 +248,7 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 	defer device.Free()
 
 	k := []int{Ktot}
-	kp := runner.NewRunner(device, builder.Config{
-		K: k,
-	})
+	kp := runner.NewRunner(device, builder.Config{K: k})
 	defer kp.Free()
 
 	// Calculate expected result on host
@@ -330,15 +328,13 @@ func TestTetNudgMatCopyMatrixReturn(t *testing.T) {
 
         double* Dx = Dx_PART(part);
         const double* Rx = Rx_PART(part);
-        // Single partition means we can safely use KpartMax as K[part]
         // ************************************************************
         // *** This computation is happening in column-major format ***
         // ************************************************************
-        for (int n = 0; n < NP; ++n; @inner) {
-            for (int k = 0; k < KpartMax; ++k) {
-                int i = n + k*NP;  // Column-major indexing
-                if (k < K[part]) {  // Bounds check for partition size
-                    // DxH.Set(j, K, tn.Rx.At(j, K)*Ur.At(j, K))
+        for (int k = 0; k < KpartMax; ++k; @inner) {
+            if (k < K[part]) {  // Bounds check for partition size
+        		for (int n = 0; n < NP; ++n) {
+                	int i = n + k*NP;  // Column-major indexing
                     Dx[i] = Rx[i]*Ur[i];
                 }
             }
