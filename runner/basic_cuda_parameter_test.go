@@ -26,14 +26,33 @@ func TestScalarMinimal(t *testing.T) {
 		hostOutput := make([]float64, 1)
 		hostOutput[0] = -999.0
 
-		err := kp.DefineKernel("memtest",
-			builder.Output("output").Bind(hostOutput).CopyBack(),
+		// Phase 1: Define bindings
+		err := kp.DefineBindings(
+			builder.Output("output").Bind(hostOutput),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
 		}
 
-		signature, _ := kp.GetKernelSignature("memtest")
+		// Phase 2: Allocate device memory
+		err = kp.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Phase 3: Configure kernel
+		config, err := kp.ConfigureKernel("memtest",
+			kp.Param("output").CopyBack(),
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		signature, err := config.GetSignature(kp)
+		if err != nil {
+			t.Fatalf("Failed to get signature: %v", err)
+		}
+
 		kernelSource := fmt.Sprintf(`
 @kernel void memtest(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -51,7 +70,7 @@ func TestScalarMinimal(t *testing.T) {
 			t.Fatalf("Failed to build kernel: %v", err)
 		}
 
-		err = kp.RunKernel("memtest")
+		err = kp.ExecuteKernel("memtest")
 		if err != nil {
 			t.Fatalf("Kernel execution failed: %v", err)
 		}
@@ -63,26 +82,46 @@ func TestScalarMinimal(t *testing.T) {
 		}
 	})
 
-	// Test case 2: Print what's in the kernel definition
-	t.Run("PrintDefinition", func(t *testing.T) {
+	// Test case 2: Print what's in the kernel configuration
+	t.Run("PrintConfiguration", func(t *testing.T) {
 		hostOutput := make([]float64, 1)
 		alpha := 2.5
 
-		err := kp.DefineKernel("printtest",
+		// Reset runner for new test
+		kp2 := NewRunner(device, builder.Config{K: []int{1}})
+		defer kp2.Free()
+
+		// Define bindings
+		err := kp2.DefineBindings(
 			builder.Output("output").Bind(hostOutput),
 			builder.Scalar("alpha").Bind(alpha),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
 		}
 
-		def := kp.kernelDefinitions["printtest"]
-		t.Logf("\nKernel Definition for 'printtest':")
-		t.Logf("  Name: %s", def.Name)
+		// Allocate device
+		err = kp2.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Configure kernel
+		config, err := kp2.ConfigureKernel("printtest",
+			kp2.Param("output"),
+			kp2.Param("alpha"),
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		t.Logf("\nKernel Configuration for 'printtest':")
+		t.Logf("  Name: %s", config.Name)
 		t.Logf("  Parameters:")
-		for i, p := range def.Parameters {
-			t.Logf("    [%d] %s: Direction=%v, DataType=%v, Binding=%v",
-				i, p.Name, p.Direction, p.DataType, p.HostBinding)
+		for i, p := range config.Parameters {
+			binding := p.Binding
+			t.Logf("    [%d] %s: IsScalar=%v, DeviceType=%v, HostBinding=%v",
+				i, binding.Name, binding.IsScalar, binding.DeviceType, binding.HostBinding)
 		}
 	})
 
@@ -97,15 +136,31 @@ func TestScalarMinimal(t *testing.T) {
 			hostOutput := make([]float64, 1)
 			alpha := 2.5
 
-			err := runner.DefineKernel("compare",
-				builder.Output("output").Bind(hostOutput).CopyBack(),
+			// Define bindings
+			err := runner.DefineBindings(
+				builder.Output("output").Bind(hostOutput),
 				builder.Scalar("alpha").Bind(alpha),
 			)
 			if err != nil {
-				return 0, fmt.Errorf("DefineKernel failed: %v", err)
+				return 0, fmt.Errorf("DefineBindings failed: %v", err)
 			}
 
-			signature, _ := runner.GetKernelSignature("compare")
+			// Allocate device
+			err = runner.AllocateDevice()
+			if err != nil {
+				return 0, fmt.Errorf("AllocateDevice failed: %v", err)
+			}
+
+			// Configure kernel
+			config, err := runner.ConfigureKernel("compare",
+				runner.Param("output").CopyBack(),
+				runner.Param("alpha"),
+			)
+			if err != nil {
+				return 0, fmt.Errorf("ConfigureKernel failed: %v", err)
+			}
+
+			signature, _ := config.GetSignature(runner)
 			kernelSource := fmt.Sprintf(`
 @kernel void compare(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -123,9 +178,9 @@ func TestScalarMinimal(t *testing.T) {
 				return 0, fmt.Errorf("BuildKernel failed: %v", err)
 			}
 
-			err = runner.RunKernel("compare")
+			err = runner.ExecuteKernel("compare")
 			if err != nil {
-				return 0, fmt.Errorf("RunKernel failed: %v", err)
+				return 0, fmt.Errorf("ExecuteKernel failed: %v", err)
 			}
 
 			return hostOutput[0], nil
@@ -171,14 +226,28 @@ func TestCudaScalarDebug(t *testing.T) {
 	t.Run("HardcodedScalar", func(t *testing.T) {
 		hostOutput := make([]float64, 1)
 
-		err := kp.DefineKernel("hardcoded",
-			builder.Output("output").Bind(hostOutput).CopyBack(),
+		// Define bindings and allocate
+		err := kp.DefineBindings(
+			builder.Output("output").Bind(hostOutput),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
 		}
 
-		signature, _ := kp.GetKernelSignature("hardcoded")
+		err = kp.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Configure kernel
+		config, err := kp.ConfigureKernel("hardcoded",
+			kp.Param("output").CopyBack(),
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		signature, _ := config.GetSignature(kp)
 		// Use hardcoded value instead of parameter
 		kernelSource := fmt.Sprintf(`
 @kernel void hardcoded(%s) {
@@ -197,7 +266,7 @@ func TestCudaScalarDebug(t *testing.T) {
 			t.Fatalf("Failed to build kernel: %v", err)
 		}
 
-		err = kp.RunKernel("hardcoded")
+		err = kp.ExecuteKernel("hardcoded")
 		if err != nil {
 			t.Fatalf("Kernel execution failed: %v", err)
 		}
@@ -211,20 +280,39 @@ func TestCudaScalarDebug(t *testing.T) {
 
 	// Test 2: Scalar parameter with different kernel structure
 	t.Run("ScalarWithDebug", func(t *testing.T) {
+		kp2 := NewRunner(device, builder.Config{K: []int{1}})
+		defer kp2.Free()
+
 		hostOutput := make([]float64, 1)
 		hostDebug := make([]float64, 3) // For debug values
 		alpha := 2.5
 
-		err := kp.DefineKernel("scalardebug",
-			builder.Output("output").Bind(hostOutput).CopyBack(),
-			builder.Output("debug").Bind(hostDebug).CopyBack(),
+		// Define bindings
+		err := kp2.DefineBindings(
+			builder.Output("output").Bind(hostOutput),
+			builder.Output("debug").Bind(hostDebug),
 			builder.Scalar("alpha").Bind(alpha),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
 		}
 
-		signature, _ := kp.GetKernelSignature("scalardebug")
+		err = kp2.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Configure kernel
+		config, err := kp2.ConfigureKernel("scalardebug",
+			kp2.Param("output").CopyBack(),
+			kp2.Param("debug").CopyBack(),
+			kp2.Param("alpha"),
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		signature, _ := config.GetSignature(kp2)
 		kernelSource := fmt.Sprintf(`
 @kernel void scalardebug(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -246,12 +334,12 @@ func TestCudaScalarDebug(t *testing.T) {
 	}
 }`, signature)
 
-		_, err = kp.BuildKernel(kernelSource, "scalardebug")
+		_, err = kp2.BuildKernel(kernelSource, "scalardebug")
 		if err != nil {
 			t.Fatalf("Failed to build kernel: %v", err)
 		}
 
-		err = kp.RunKernel("scalardebug")
+		err = kp2.ExecuteKernel("scalardebug")
 		if err != nil {
 			t.Fatalf("Kernel execution failed: %v", err)
 		}
@@ -269,20 +357,39 @@ func TestCudaScalarDebug(t *testing.T) {
 
 	// Test 3: Multiple scalars
 	t.Run("MultipleScalars", func(t *testing.T) {
+		kp3 := NewRunner(device, builder.Config{K: []int{1}})
+		defer kp3.Free()
+
 		hostOutput := make([]float64, 1)
 		alpha := 2.5
 		beta := 3.0
 
-		err := kp.DefineKernel("multiscalar",
-			builder.Output("output").Bind(hostOutput).CopyBack(),
+		// Define bindings
+		err := kp3.DefineBindings(
+			builder.Output("output").Bind(hostOutput),
 			builder.Scalar("alpha").Bind(alpha),
 			builder.Scalar("beta").Bind(beta),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
 		}
 
-		signature, _ := kp.GetKernelSignature("multiscalar")
+		err = kp3.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Configure kernel
+		config, err := kp3.ConfigureKernel("multiscalar",
+			kp3.Param("output").CopyBack(),
+			kp3.Param("alpha"),
+			kp3.Param("beta"),
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		signature, _ := config.GetSignature(kp3)
 		kernelSource := fmt.Sprintf(`
 @kernel void multiscalar(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -295,12 +402,12 @@ func TestCudaScalarDebug(t *testing.T) {
 	}
 }`, signature)
 
-		_, err = kp.BuildKernel(kernelSource, "multiscalar")
+		_, err = kp3.BuildKernel(kernelSource, "multiscalar")
 		if err != nil {
 			t.Fatalf("Failed to build kernel: %v", err)
 		}
 
-		err = kp.RunKernel("multiscalar")
+		err = kp3.ExecuteKernel("multiscalar")
 		if err != nil {
 			t.Fatalf("Kernel execution failed: %v", err)
 		}
@@ -327,25 +434,35 @@ func TestTraceAllocatedArrays(t *testing.T) {
 	// Step 1: Initial state
 	t.Logf("Initial AllocatedArrays: %v", kp.GetAllocatedArrays())
 
-	// Step 2: Define kernel with two outputs
+	// Step 2: Define bindings
 	hostOutput := make([]float64, 1)
 	hostDebug := make([]float64, 3)
 	alpha := 2.5
 
-	t.Log("Defining kernel with two outputs...")
-	err := kp.DefineKernel("test",
-		builder.Output("output").Bind(hostOutput).CopyBack(),
-		builder.Output("debug").Bind(hostDebug).CopyBack(),
+	t.Log("Defining bindings...")
+	err := kp.DefineBindings(
+		builder.Output("output").Bind(hostOutput),
+		builder.Output("debug").Bind(hostDebug),
 		builder.Scalar("alpha").Bind(alpha),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	// Step 3: Check AllocatedArrays after DefineKernel
-	t.Logf("After DefineKernel, AllocatedArrays: %v", kp.GetAllocatedArrays())
+	// Step 3: Check AllocatedArrays after DefineBindings (should still be empty)
+	t.Logf("After DefineBindings, AllocatedArrays: %v", kp.GetAllocatedArrays())
 
-	// Step 4: Check if memory was allocated
+	// Step 4: Allocate device memory
+	t.Log("Allocating device memory...")
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Step 5: Check AllocatedArrays after AllocateDevice
+	t.Logf("After AllocateDevice, AllocatedArrays: %v", kp.GetAllocatedArrays())
+
+	// Step 6: Check if memory was allocated
 	for _, name := range []string{"output", "debug"} {
 		if mem := kp.GetMemory(name); mem == nil {
 			t.Errorf("Memory for %s not allocated", name)
@@ -354,7 +471,7 @@ func TestTraceAllocatedArrays(t *testing.T) {
 		}
 	}
 
-	// Step 5: Generate preamble and check for macros
+	// Step 7: Generate preamble and check for macros
 	preamble := kp.GeneratePreamble(kp.GetAllocatedArrays(),
 		kp.collectArrayTypes())
 	t.Log("Generated preamble:")
@@ -408,15 +525,31 @@ func TestSimplestCudaScalar(t *testing.T) {
 	hostOutput := make([]float64, 1)
 	alpha := 2.5
 
-	err := kp.DefineKernel("simple",
-		builder.Output("output").Bind(hostOutput).CopyBack(),
+	// Define bindings
+	err := kp.DefineBindings(
+		builder.Output("output").Bind(hostOutput),
 		builder.Scalar("alpha").Bind(alpha),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	signature, _ := kp.GetKernelSignature("simple")
+	// Allocate device
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Configure kernel
+	config, err := kp.ConfigureKernel("simple",
+		kp.Param("output").CopyBack(),
+		kp.Param("alpha"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
+	}
+
+	signature, _ := config.GetSignature(kp)
 	t.Logf("Signature:\n%s", signature)
 
 	// Check AllocatedArrays
@@ -455,7 +588,7 @@ func TestSimplestCudaScalar(t *testing.T) {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	err = kp.RunKernel("simple")
+	err = kp.ExecuteKernel("simple")
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
@@ -583,29 +716,53 @@ func TestMultipleKernelDefinitions(t *testing.T) {
 	})
 	defer runner.Free()
 
-	// Step 1: Define first kernel
-	t.Log("=== Step 1: Defining first kernel ===")
+	// Step 1: Define bindings for both kernels upfront
+	t.Log("=== Step 1: Defining all bindings ===")
 	hostOutput1 := make([]float64, 1)
-	err := runner.DefineKernel("kernel1",
-		builder.Output("output1").Bind(hostOutput1).CopyBack(),
+	hostOutput2 := make([]float64, 1)
+	hostDebug := make([]float64, 3)
+	alpha := 2.5
+
+	err := runner.DefineBindings(
+		builder.Output("output1").Bind(hostOutput1),
+		builder.Output("output2").Bind(hostOutput2),
+		builder.Output("debug").Bind(hostDebug),
+		builder.Scalar("alpha").Bind(alpha),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel1: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Allocate device memory
+	err = runner.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
 	}
 
 	// Check allocated arrays
-	arrays1 := runner.GetAllocatedArrays()
-	t.Logf("After kernel1 definition, allocated arrays: %v", arrays1)
+	arrays := runner.GetAllocatedArrays()
+	t.Logf("After allocation, allocated arrays: %v", arrays)
 
 	// Check if memory was allocated
-	if mem := runner.GetMemory("output1"); mem == nil {
-		t.Error("Memory for output1 not allocated")
-	} else {
-		t.Log("Memory for output1: allocated")
+	for _, name := range []string{"output1", "output2", "debug"} {
+		if mem := runner.GetMemory(name); mem == nil {
+			t.Errorf("Memory for %s not allocated", name)
+		} else {
+			t.Logf("Memory for %s: allocated", name)
+		}
 	}
 
-	// Build and run first kernel
-	signature1, _ := runner.GetKernelSignature("kernel1")
+	// Step 2: Configure and run first kernel
+	t.Log("\n=== Step 2: First kernel ===")
+
+	config1, err := runner.ConfigureKernel("kernel1",
+		runner.Param("output1").CopyBack(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel1: %v", err)
+	}
+
+	signature1, _ := config1.GetSignature(runner)
 	kernelSource1 := fmt.Sprintf(`
 @kernel void kernel1(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -623,7 +780,7 @@ func TestMultipleKernelDefinitions(t *testing.T) {
 		t.Fatalf("Failed to build kernel1: %v", err)
 	}
 
-	err = runner.RunKernel("kernel1")
+	err = runner.ExecuteKernel("kernel1")
 	if err != nil {
 		t.Fatalf("Failed to run kernel1: %v", err)
 	}
@@ -633,42 +790,16 @@ func TestMultipleKernelDefinitions(t *testing.T) {
 		t.Error("kernel1 failed")
 	}
 
-	// Step 2: Define second kernel with different parameters
-	t.Log("\n=== Step 2: Defining second kernel ===")
-	hostOutput2 := make([]float64, 1)
-	hostDebug := make([]float64, 3)
-	alpha := 2.5
+	// Step 3: Configure and run second kernel
+	t.Log("\n=== Step 3: Second kernel ===")
 
-	err = runner.DefineKernel("kernel2",
-		builder.Output("output2").Bind(hostOutput2).CopyBack(),
-		builder.Output("debug").Bind(hostDebug).CopyBack(),
-		builder.Scalar("alpha").Bind(alpha),
+	config2, err := runner.ConfigureKernel("kernel2",
+		runner.Param("output2").CopyBack(),
+		runner.Param("debug").CopyBack(),
+		runner.Param("alpha"),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel2: %v", err)
-	}
-
-	// Check allocated arrays after second kernel
-	arrays2 := runner.GetAllocatedArrays()
-	t.Logf("After kernel2 definition, allocated arrays: %v", arrays2)
-
-	// Check if new arrays were allocated
-	for _, name := range []string{"output2", "debug"} {
-		if mem := runner.GetMemory(name); mem == nil {
-			t.Errorf("Memory for %s not allocated", name)
-		} else {
-			t.Logf("Memory for %s: allocated", name)
-		}
-	}
-
-	// Print the kernel configuration to debug
-	if config, exists := runner.KernelConfigs["kernel2"]; exists {
-		t.Log("kernel2 configuration:")
-		for i, param := range config.Parameters {
-			t.Logf("  [%d] %s: IsScalar=%v, CopyTo=%v, CopyBack=%v",
-				i, param.Binding.Name, param.Binding.IsScalar,
-				param.HasAction(CopyTo), param.HasAction(CopyBack))
-		}
+		t.Fatalf("Failed to configure kernel2: %v", err)
 	}
 
 	// Generate preamble to check macros
@@ -690,7 +821,7 @@ func TestMultipleKernelDefinitions(t *testing.T) {
 	}
 
 	// Build and run second kernel
-	signature2, _ := runner.GetKernelSignature("kernel2")
+	signature2, _ := config2.GetSignature(runner)
 	t.Logf("kernel2 signature:\n%s", signature2)
 
 	kernelSource2 := fmt.Sprintf(`
@@ -719,7 +850,7 @@ func TestMultipleKernelDefinitions(t *testing.T) {
 		t.Fatalf("Failed to build kernel2: %v", err)
 	}
 
-	err = runner.RunKernel("kernel2")
+	err = runner.ExecuteKernel("kernel2")
 	if err != nil {
 		t.Fatalf("Failed to run kernel2: %v", err)
 	}

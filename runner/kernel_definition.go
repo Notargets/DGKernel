@@ -20,7 +20,8 @@ type KernelDefinition struct {
 
 // DefineKernel defines a kernel with its parameters using the old API
 // DEPRECATED: Use DefineBindings + AllocateDevice + ConfigureKernel instead
-func (kr *Runner) DefineKernel(kernelName string, params ...*builder.ParamBuilder) error {
+func (kr *Runner) _DefineKernel(kernelName string,
+	params ...*builder.ParamBuilder) error {
 	// Print deprecation warning
 	fmt.Printf("WARNING: DefineKernel is deprecated and will be removed. Use DefineBindings + AllocateDevice + ConfigureKernel instead.\n")
 
@@ -146,7 +147,7 @@ func (kr *Runner) processParameterFromBinding(binding *DeviceBinding) error {
 
 // GetKernelSignature returns the kernel signature for backward compatibility
 // DEPRECATED: Use GetKernelSignatureForConfig instead
-func (kr *Runner) GetKernelSignature(kernelName string) (string, error) {
+func (kr *Runner) _GetKernelSignature(kernelName string) (string, error) {
 	// Try new API first
 	if config, exists := kr.KernelConfigs[kernelName]; exists {
 		return config.GetSignature(kr)
