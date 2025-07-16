@@ -25,6 +25,9 @@ const (
 	Copy = CopyTo | CopyBack
 )
 
+// File: runner/binding.go
+// Updated DeviceBinding struct with proper documentation
+
 // DeviceBinding represents a host↔device data binding
 // This structure captures all metadata about a parameter's memory relationship
 type DeviceBinding struct {
@@ -43,7 +46,10 @@ type DeviceBinding struct {
 	ElementSize int   // Size of each element in bytes on device
 
 	// Data layout flags
-	IsMatrix      bool // Host data is mat.Matrix or []mat.Matrix
+	// CRITICAL: IsMatrix is ONLY for MATMUL macro generation and memory naming
+	// It does NOT affect copy operations - all mat.Matrix types are ALWAYS transposed
+	// regardless of this flag. Copy behavior is determined by the actual data type.
+	IsMatrix      bool // If true, generates MATMUL macros; affects memory naming (no "_global" suffix)
 	IsStatic      bool // Matrix embedded as static const in kernel
 	IsPartitioned bool // Data is partitioned ([][]T or []mat.Matrix)
 	IsScalar      bool // Single value parameter
@@ -54,16 +60,18 @@ type DeviceBinding struct {
 	MatrixCols int
 	Stride     int // For flat array to matrix promotion
 
-	// Partitioned data metadata
+	// Partition metadata
 	PartitionCount int
 	PartitionSizes []int // Size of each partition
 
-	// Memory attributes
+	// Alignment
 	Alignment builder.AlignmentType
-	IsOutput  bool // Whether parameter can be written to in kernel
 
-	// Original parameter specification (for compatibility during migration)
-	ParamSpec *builder.ParamSpec
+	// Output tracking
+	IsOutput bool // Parameter is written by kernel
+
+	// Legacy compatibility
+	ParamSpec *builder.ParamSpec // Original param spec for compatibility
 }
 
 // ParameterUsage represents how a binding is used in a specific kernel or copy operation

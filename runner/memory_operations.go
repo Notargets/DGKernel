@@ -1,6 +1,3 @@
-// File: runner/memory_operations.go
-// Phase 4: Unified Copy Infrastructure - Single copy execution path
-
 package runner
 
 import (
@@ -37,6 +34,14 @@ func (kr *Runner) executeCopyActions(actions []ParameterUsage) error {
 	return nil
 }
 
+// isMatrixType checks if the host binding is a mat.Matrix type
+// This is used to determine copy behavior (transpose vs non-transpose)
+// IMPORTANT: This is completely independent of the IsMatrix flag
+func isMatrixType(hostBinding interface{}) bool {
+	_, ok := hostBinding.(mat.Matrix)
+	return ok
+}
+
 // copyToDeviceFromBinding performs host→device copy using DeviceBinding
 func (kr *Runner) copyToDeviceFromBinding(binding *DeviceBinding) error {
 	// Skip if no host binding
@@ -50,6 +55,7 @@ func (kr *Runner) copyToDeviceFromBinding(binding *DeviceBinding) error {
 	}
 
 	// Get device memory
+	// NOTE: Memory location logic uses IsMatrix flag for naming conventions only
 	var mem *gocca.OCCAMemory
 	if binding.IsMatrix && !binding.IsStatic {
 		// Device matrices are stored without "_global" suffix
@@ -68,12 +74,11 @@ func (kr *Runner) copyToDeviceFromBinding(binding *DeviceBinding) error {
 		return kr.copyPartitionedDataToDevice(binding, mem)
 	}
 
-	// Handle matrices
-	if binding.IsMatrix {
-		matrix, ok := binding.HostBinding.(mat.Matrix)
-		if !ok {
-			return fmt.Errorf("invalid matrix binding for %s", binding.Name)
-		}
+	// CRITICAL: Check actual type for copy behavior, NOT IsMatrix flag
+	// The IsMatrix flag is ONLY for MATMUL macro generation
+	if isMatrixType(binding.HostBinding) {
+		// All mat.Matrix types must go through transpose path
+		matrix := binding.HostBinding.(mat.Matrix)
 		return kr.copyMatrixToDevice(matrix, mem, binding.DeviceType)
 	}
 
@@ -94,6 +99,7 @@ func (kr *Runner) copyFromDeviceFromBinding(binding *DeviceBinding) error {
 	}
 
 	// Get device memory
+	// NOTE: Memory location logic uses IsMatrix flag for naming conventions only
 	var mem *gocca.OCCAMemory
 	if binding.IsMatrix && !binding.IsStatic {
 		// Device matrices are stored without "_global" suffix
@@ -112,12 +118,11 @@ func (kr *Runner) copyFromDeviceFromBinding(binding *DeviceBinding) error {
 		return kr.copyPartitionedDataFromDeviceBinding(binding, mem)
 	}
 
-	// Handle matrices
-	if binding.IsMatrix {
-		matrix, ok := binding.HostBinding.(mat.Matrix)
-		if !ok {
-			return fmt.Errorf("invalid matrix binding for %s", binding.Name)
-		}
+	// CRITICAL: Check actual type for copy behavior, NOT IsMatrix flag
+	// The IsMatrix flag is ONLY for MATMUL macro generation
+	if isMatrixType(binding.HostBinding) {
+		// All mat.Matrix types must go through transpose path
+		matrix := binding.HostBinding.(mat.Matrix)
 		return kr.copyMatrixFromDevice(matrix, mem, binding.DeviceType)
 	}
 
@@ -242,110 +247,172 @@ func (kr *Runner) copyWithTypeConversion(hostData interface{}, mem *gocca.OCCAMe
 	switch hostType {
 	case builder.Float64:
 		data := hostData.([]float64)
-		if deviceType == builder.Float32 {
-			// Convert float64 → float32
+		switch deviceType {
+		case builder.Float32:
+			// Convert float64 to float32
 			converted := make([]float32, len(data))
 			for i, v := range data {
 				converted[i] = float32(v)
 			}
 			mem.CopyFrom(unsafe.Pointer(&converted[0]), int64(len(converted)*4))
-			return nil
+		case builder.Float64:
+			// Same type - direct copy
+			mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+		default:
+			return fmt.Errorf("unsupported conversion from float64 to %v", deviceType)
 		}
 
 	case builder.Float32:
 		data := hostData.([]float32)
-		if deviceType == builder.Float64 {
-			// Convert float32 → float64
+		switch deviceType {
+		case builder.Float64:
+			// Convert float32 to float64
 			converted := make([]float64, len(data))
 			for i, v := range data {
 				converted[i] = float64(v)
 			}
 			mem.CopyFrom(unsafe.Pointer(&converted[0]), int64(len(converted)*8))
-			return nil
-		}
-
-	case builder.INT64:
-		data := hostData.([]int64)
-		if deviceType == builder.INT32 {
-			// Convert int64 → int32
-			converted := make([]int32, len(data))
-			for i, v := range data {
-				converted[i] = int32(v)
-			}
-			mem.CopyFrom(unsafe.Pointer(&converted[0]), int64(len(converted)*4))
-			return nil
+		case builder.Float32:
+			// Same type - direct copy
+			mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
+		default:
+			return fmt.Errorf("unsupported conversion from float32 to %v", deviceType)
 		}
 
 	case builder.INT32:
 		data := hostData.([]int32)
-		if deviceType == builder.INT64 {
-			// Convert int32 → int64
+		switch deviceType {
+		case builder.INT64:
+			// Convert int32 to int64
 			converted := make([]int64, len(data))
 			for i, v := range data {
 				converted[i] = int64(v)
 			}
 			mem.CopyFrom(unsafe.Pointer(&converted[0]), int64(len(converted)*8))
-			return nil
+		case builder.INT32:
+			// Same type - direct copy
+			mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*4))
+		default:
+			return fmt.Errorf("unsupported conversion from int32 to %v", deviceType)
 		}
+
+	case builder.INT64:
+		data := hostData.([]int64)
+		switch deviceType {
+		case builder.INT32:
+			// Convert int64 to int32 (with potential data loss)
+			converted := make([]int32, len(data))
+			for i, v := range data {
+				converted[i] = int32(v)
+			}
+			mem.CopyFrom(unsafe.Pointer(&converted[0]), int64(len(converted)*4))
+		case builder.INT64:
+			// Same type - direct copy
+			mem.CopyFrom(unsafe.Pointer(&data[0]), int64(len(data)*8))
+		default:
+			return fmt.Errorf("unsupported conversion from int64 to %v", deviceType)
+		}
+
+	default:
+		return fmt.Errorf("unsupported host type for conversion: %v", hostType)
 	}
 
-	return fmt.Errorf("unsupported type conversion: %v → %v", hostType, deviceType)
+	return nil
 }
 
 // copyFromDeviceWithTypeConversion handles type conversion during device→host copy
 func (kr *Runner) copyFromDeviceWithTypeConversion(mem *gocca.OCCAMemory, hostData interface{},
-	deviceType, hostType builder.DataType, totalBytes int64) error {
+	deviceType, hostType builder.DataType, bytes int64) error {
 
 	// Handle all conversion cases
 	switch deviceType {
 	case builder.Float32:
-		if hostType == builder.Float64 {
-			// Read float32 from device, convert to float64
-			data := hostData.([]float64)
-			temp := make([]float32, len(data))
-			mem.CopyTo(unsafe.Pointer(&temp[0]), int64(len(temp)*4))
-			for i, v := range temp {
-				data[i] = float64(v)
+		// Read float32 from device
+		elemCount := bytes / 4
+		deviceData := make([]float32, elemCount)
+		mem.CopyTo(unsafe.Pointer(&deviceData[0]), bytes)
+
+		switch hostType {
+		case builder.Float64:
+			// Convert to float64
+			hostSlice := hostData.([]float64)
+			for i, v := range deviceData {
+				hostSlice[i] = float64(v)
 			}
-			return nil
+		case builder.Float32:
+			// Same type - direct copy
+			hostSlice := hostData.([]float32)
+			copy(hostSlice, deviceData)
+		default:
+			return fmt.Errorf("unsupported conversion from device float32 to host %v", hostType)
 		}
 
 	case builder.Float64:
-		if hostType == builder.Float32 {
-			// Read float64 from device, convert to float32
-			data := hostData.([]float32)
-			temp := make([]float64, len(data))
-			mem.CopyTo(unsafe.Pointer(&temp[0]), int64(len(temp)*8))
-			for i, v := range temp {
-				data[i] = float32(v)
+		// Read float64 from device
+		elemCount := bytes / 8
+		deviceData := make([]float64, elemCount)
+		mem.CopyTo(unsafe.Pointer(&deviceData[0]), bytes)
+
+		switch hostType {
+		case builder.Float32:
+			// Convert to float32
+			hostSlice := hostData.([]float32)
+			for i, v := range deviceData {
+				hostSlice[i] = float32(v)
 			}
-			return nil
+		case builder.Float64:
+			// Same type - direct copy
+			hostSlice := hostData.([]float64)
+			copy(hostSlice, deviceData)
+		default:
+			return fmt.Errorf("unsupported conversion from device float64 to host %v", hostType)
 		}
 
 	case builder.INT32:
-		if hostType == builder.INT64 {
-			// Read int32 from device, convert to int64
-			data := hostData.([]int64)
-			temp := make([]int32, len(data))
-			mem.CopyTo(unsafe.Pointer(&temp[0]), int64(len(temp)*4))
-			for i, v := range temp {
-				data[i] = int64(v)
+		// Read int32 from device
+		elemCount := bytes / 4
+		deviceData := make([]int32, elemCount)
+		mem.CopyTo(unsafe.Pointer(&deviceData[0]), bytes)
+
+		switch hostType {
+		case builder.INT64:
+			// Convert to int64
+			hostSlice := hostData.([]int64)
+			for i, v := range deviceData {
+				hostSlice[i] = int64(v)
 			}
-			return nil
+		case builder.INT32:
+			// Same type - direct copy
+			hostSlice := hostData.([]int32)
+			copy(hostSlice, deviceData)
+		default:
+			return fmt.Errorf("unsupported conversion from device int32 to host %v", hostType)
 		}
 
 	case builder.INT64:
-		if hostType == builder.INT32 {
-			// Read int64 from device, convert to int32
-			data := hostData.([]int32)
-			temp := make([]int64, len(data))
-			mem.CopyTo(unsafe.Pointer(&temp[0]), int64(len(temp)*8))
-			for i, v := range temp {
-				data[i] = int32(v)
+		// Read int64 from device
+		elemCount := bytes / 8
+		deviceData := make([]int64, elemCount)
+		mem.CopyTo(unsafe.Pointer(&deviceData[0]), bytes)
+
+		switch hostType {
+		case builder.INT32:
+			// Convert to int32
+			hostSlice := hostData.([]int32)
+			for i, v := range deviceData {
+				hostSlice[i] = int32(v)
 			}
-			return nil
+		case builder.INT64:
+			// Same type - direct copy
+			hostSlice := hostData.([]int64)
+			copy(hostSlice, deviceData)
+		default:
+			return fmt.Errorf("unsupported conversion from device int64 to host %v", hostType)
 		}
+
+	default:
+		return fmt.Errorf("unsupported device type for conversion: %v", deviceType)
 	}
 
-	return fmt.Errorf("unsupported type conversion: %v → %v", deviceType, hostType)
+	return nil
 }
