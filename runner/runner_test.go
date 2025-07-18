@@ -759,16 +759,16 @@ func TestDGKernel_ManualMemoryOps(t *testing.T) {
 	}
 
 	// Configure kernel without copy actions
-	_, err = kp.ConfigureKernel("double",
+	_, err = kp.ConfigureKernel("dble",
 		kp.Param("data"), // No copy actions
 	)
 	if err != nil {
 		t.Fatalf("Failed to configure kernel: %v", err)
 	}
 
-	sig, _ := kp.GetKernelSignatureForConfig("double")
+	sig, _ := kp.GetKernelSignatureForConfig("dble")
 	kernelSrc := fmt.Sprintf(`
-@kernel void double(%s) {
+@kernel void dble(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		double* data = data_PART(part);
 		
@@ -780,12 +780,12 @@ func TestDGKernel_ManualMemoryOps(t *testing.T) {
 	}
 }`, sig)
 
-	_, err = kp.BuildKernel(kernelSrc, "double")
+	_, err = kp.BuildKernel(kernelSrc, "dble")
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	err = kp.ExecuteKernel("double")
+	err = kp.ExecuteKernel("dble")
 	if err != nil {
 		t.Fatalf("Failed to execute kernel: %v", err)
 	}
