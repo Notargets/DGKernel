@@ -13,39 +13,25 @@ import (
 func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *gocca.OCCAMemory,
 	offsets []int64, needsConversion bool, sourceType builder.DataType) error {
 
-	// fmt.Printf("\n=== BEGIN copyMatrixPartitionsFromDevice DEBUG ===\n")
-	// fmt.Printf("Num partitions: %d, needsConversion: %v, sourceType: %v\n",
-	// 	kr.NumPartitions, needsConversion, sourceType)
-	// fmt.Printf("Offsets: %v\n", offsets)
-
 	for i, matrix := range data {
 		if i >= kr.NumPartitions {
 			break
 		}
 
-		// fmt.Printf("\nPartition %d:\n", i)
 		rows, cols := matrix.Dims()
-		// fmt.Printf("  Matrix dims: %dx%d = %d elements\n", rows, cols, rows*cols)
 		size := rows * cols
 
 		if needsConversion && sourceType == builder.Float32 {
-			// Read as float32 and convert
+			// Device has float32, need to convert to float64 for host (gonum matrices are always float64)
 			temp := make([]float32, size)
 			partitionBytes := int64(size * 4)
-			offsetBytes := offsets[i] * 4
-
-			// fmt.Printf("  Conversion path (float32 -> float64)\n")
-			// fmt.Printf("  Partition bytes: %d\n", partitionBytes)
-			// fmt.Printf("  Offset bytes: %d\n", offsetBytes)
-			// fmt.Printf("  Calling CopyToWithOffset...\n")
+			offsetBytes := offsets[i] * 4 // Device has float32, so 4 bytes per element
 
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
 
-			// fmt.Printf("  CopyToWithOffset succeeded\n")
-
 			// Type assert to mutable matrix
 			if m, ok := matrix.(*mat.Dense); ok {
-				// Convert and unpack
+				// Convert float32 to float64 and unpack from column-major
 				for r := 0; r < rows; r++ {
 					for c := 0; c < cols; c++ {
 						val := float64(temp[c*rows+r])
@@ -53,30 +39,32 @@ func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *g
 					}
 				}
 			}
-		} else {
-			// Direct copy
+		} else if needsConversion && sourceType == builder.Float64 {
+			// This case shouldn't happen for gonum matrices (they're already float64)
+			// But handle it for completeness
 			flatData := make([]float64, size)
 			partitionBytes := int64(size * 8)
 			offsetBytes := offsets[i] * 8
 
-			// fmt.Printf("  Direct copy path (no conversion)\n")
-			// fmt.Printf("  Partition bytes: %d\n", partitionBytes)
-			// fmt.Printf("  Offset bytes: %d\n", offsetBytes)
-			// fmt.Printf("  Access range: [%d, %d)\n", offsetBytes, offsetBytes+partitionBytes)
+			deviceMem.CopyToWithOffset(unsafe.Pointer(&flatData[0]), partitionBytes, offsetBytes)
 
-			// DEBUG: Check if we have a next offset to verify bounds
-			if i+1 < len(offsets) {
-				nextOffsetBytes := offsets[i+1] * 8
-				// fmt.Printf("  Next partition starts at: %d bytes\n", nextOffsetBytes)
-				if offsetBytes+partitionBytes > nextOffsetBytes {
-					// fmt.Printf("  *** WARNING: Would overrun into next partition! ***\n")
+			// Type assert to mutable matrix
+			if m, ok := matrix.(*mat.Dense); ok {
+				// Unpack column-major data back into the Dense matrix
+				for r := 0; r < rows; r++ {
+					for c := 0; c < cols; c++ {
+						val := flatData[c*rows+r]
+						m.Set(r, c, val)
+					}
 				}
 			}
+		} else {
+			// Direct copy - device has float64, host expects float64
+			flatData := make([]float64, size)
+			partitionBytes := int64(size * 8)
+			offsetBytes := offsets[i] * 8 // offsets[i] is in elements, multiply by element size
 
-			// This is where the error occurs
-			// fmt.Printf("  Calling CopyToWithOffset...\n")
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&flatData[0]), partitionBytes, offsetBytes)
-			// fmt.Printf("  CopyToWithOffset succeeded\n")
 
 			// Type assert to mutable matrix
 			if m, ok := matrix.(*mat.Dense); ok {
@@ -89,10 +77,8 @@ func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *g
 				}
 			}
 		}
-		// fmt.Printf("\n")
 	}
 
-	// fmt.Printf("=== END copyMatrixPartitionsFromDevice DEBUG ===\n\n")
 	return nil
 }
 
@@ -585,20 +571,20 @@ func (kr *Runner) copyInt32PartitionsFromDevice(data [][]int32, deviceMem *gocca
 		}
 
 		if needsConversion && sourceType == builder.INT64 {
-			// Read as int64 and convert to int32
+			// Device has int64, need to convert to int32 for host
 			temp := make([]int64, len(partition))
 			partitionBytes := int64(len(temp) * 8)
-			offsetBytes := offsets[i] * 8
+			offsetBytes := offsets[i] * 8 // Device has int64, so 8 bytes per element
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
 
-			// Convert to int32
+			// Convert from int64 to int32 (with potential data loss)
 			for j, v := range temp {
 				partition[j] = int32(v)
 			}
 		} else {
-			// Direct copy
+			// Direct copy - device has int32, host has int32
 			partitionBytes := int64(len(partition) * 4)
-			offsetBytes := offsets[i] * 4
+			offsetBytes := offsets[i] * 4 // offsets[i] is in elements, multiply by element size
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&partition[0]), partitionBytes, offsetBytes)
 		}
 	}

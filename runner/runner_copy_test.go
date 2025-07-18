@@ -14,14 +14,13 @@ import (
 // ============================================================================
 
 func TestRunner_CopySemantics(t *testing.T) {
-	// device := utils.CreateTestDevice()
 	device := utils.CreateTestDevice(true)
 	defer device.Free()
 
-	kp := NewRunner(device, builder.Config{K: []int{10}})
-	defer kp.Free()
-
 	t.Run("CopyTo_Only", func(t *testing.T) {
+		kp := NewRunner(device, builder.Config{K: []int{10}})
+		defer kp.Free()
+
 		hostData := make([]float64, 10)
 		for i := range hostData {
 			hostData[i] = float64(i)
@@ -78,6 +77,9 @@ func TestRunner_CopySemantics(t *testing.T) {
 	})
 
 	t.Run("Copy_Bidirectional", func(t *testing.T) {
+		kp := NewRunner(device, builder.Config{K: []int{10}})
+		defer kp.Free()
+
 		hostData := make([]float64, 10)
 		for i := range hostData {
 			hostData[i] = float64(i)
@@ -132,6 +134,9 @@ func TestRunner_CopySemantics(t *testing.T) {
 	})
 
 	t.Run("Copy_Bidirectional_Matrix", func(t *testing.T) {
+		kp := NewRunner(device, builder.Config{K: []int{10}})
+		defer kp.Free()
+
 		hostData := make([]float64, 10)
 		for i := range hostData {
 			hostData[i] = float64(i)
@@ -154,7 +159,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 
 		// Phase 2: Configure kernel
 		_, err = kp.ConfigureKernel("copy_test",
-			kp.Param("data").Copy(), // Copies both ways
+			kp.Param("data").Copy(),
 		)
 		if err != nil {
 			t.Fatalf("Failed to configure kernel: %v", err)
@@ -187,6 +192,9 @@ func TestRunner_CopySemantics(t *testing.T) {
 	})
 
 	t.Run("CopyBack_Matrix", func(t *testing.T) {
+		kp := NewRunner(device, builder.Config{K: []int{10}})
+		defer kp.Free()
+
 		hostData := make([]float64, 10)
 		for i := range hostData {
 			hostData[i] = float64(i)
@@ -275,7 +283,7 @@ func TestRunner_PartitionCopy(t *testing.T) {
 
 	// Phase 1: Define bindings
 	err := kp.DefineBindings(
-		builder.InOut("data").Bind(hostData),
+		builder.InOut("data").Bind(splitSlice(k, hostData)),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define bindings: %v", err)
