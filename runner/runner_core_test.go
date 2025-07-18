@@ -195,9 +195,9 @@ func TestRunner_MultiplePartitions_Core(t *testing.T) {
 
 	// Phase 1: Define bindings
 	err := kp.DefineBindings(
-		builder.Input("A").Bind(hostA),
-		builder.Input("B").Bind(hostB),
-		builder.Output("C").Bind(hostC),
+		builder.Input("A").Bind(splitSlice(k, hostA)),
+		builder.Input("B").Bind(splitSlice(k, hostB)),
+		builder.Output("C").Bind(splitSlice(k, hostC)),
 		builder.Scalar("alpha").Bind(1.5),
 	)
 	if err != nil {

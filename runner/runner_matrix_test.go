@@ -49,8 +49,8 @@ func TestRunner_MatrixMultiplication(t *testing.T) {
 	// Phase 1: Define bindings
 	err := kp.DefineBindings(
 		builder.Input("TestMat").Bind(testMatrix).ToMatrix().Static(),
-		builder.Input("U").Bind(hostU),
-		builder.Output("V").Bind(hostV),
+		builder.Input("U").Bind(splitSlice(k, hostU)),
+		builder.Output("V").Bind(splitSlice(k, hostV)),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define bindings: %v", err)
