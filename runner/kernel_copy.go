@@ -523,9 +523,16 @@ func (kr *Runner) copyFloat32PartitionsFromDevice(data [][]float32, deviceMem *g
 		}
 
 		if needsConversion && sourceType == builder.Float64 {
-			// WRONG: Device has float64, but output specified Float32 allocation
-			// This shouldn't happen with proper GetEffectiveType implementation
-			return fmt.Errorf("invalid conversion: output array on device should match Convert type")
+			// Device has float64, need to convert to float32 for host
+			temp := make([]float64, len(partition))
+			partitionBytes := int64(len(temp) * 8)
+			offsetBytes := offsets[i] * 8 // Device has float64, so 8 bytes per element
+			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
+
+			// Convert from float64 to float32
+			for j, v := range temp {
+				partition[j] = float32(v)
+			}
 		} else {
 			// Direct copy - device has float32, host has float32
 			partitionBytes := int64(len(partition) * 4)
