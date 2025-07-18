@@ -379,14 +379,16 @@ func TestDGKernel_NewAPI_MultipleArrays(t *testing.T) {
 	}
 
 	// Host arrays - using flat arrays for simplicity
-	hostU := make([]float64, totalElements)
-	hostV := make([]float64, totalElements)
-	hostRHS := make([]float64, totalElements)
+	hostU := splitSlice(k, make([]float64, totalElements))
+	hostV := splitSlice(k, make([]float64, totalElements))
+	hostRHS := splitSlice(k, make([]float64, totalElements))
 
 	// Initialize
-	for i := 0; i < totalElements; i++ {
-		hostU[i] = float64(i)
-		hostV[i] = float64(i) * 2.0
+	for ii, K := range k {
+		for kk := 0; kk < K; kk++ {
+			hostU[ii][kk] = float64(kk)
+			hostV[ii][kk] = float64(kk) * 2.0
+		}
 	}
 
 	// Phase 1: Define bindings
@@ -451,10 +453,15 @@ func TestDGKernel_NewAPI_MultipleArrays(t *testing.T) {
 	}
 
 	// Verify results
-	for i := 0; i < totalElements; i++ {
-		expected := 1.5*float64(i) + 2.5*float64(i)*2.0
-		if math.Abs(hostRHS[i]-expected) > 1e-10 {
-			t.Errorf("Element %d: expected %f, got %f", i, expected, hostRHS[i])
+	for ii, K := range k {
+		for j := 0; j < 1; j++ {
+			for kk := 0; kk < K; kk++ {
+				expected := 1.5*float64(kk) + 2.5*float64(kk)*2.0
+				if math.Abs(hostRHS[ii][kk]-expected) > 1e-10 {
+					t.Errorf("Element %d: expected %f, got %f", kk, expected,
+						hostRHS[ii][kk])
+				}
+			}
 		}
 	}
 }

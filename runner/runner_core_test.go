@@ -361,7 +361,9 @@ func TestRunner_ScalarParameters(t *testing.T) {
 	// Various scalar types
 	floatVal := 3.14
 	intVal := int64(42)
-	complexVal := complex(2.0, 3.0)
+	// Split complex into real and imaginary parts
+	complexReal := 2.0
+	complexImag := 3.0
 
 	result := make([]float64, 10)
 
@@ -370,7 +372,9 @@ func TestRunner_ScalarParameters(t *testing.T) {
 		builder.Output("result").Bind(result),
 		builder.Scalar("pi").Bind(floatVal),
 		builder.Scalar("answer").Bind(intVal),
-		builder.Scalar("comp").Bind(complexVal),
+		// Pass complex parts as separate scalars
+		builder.Scalar("comp_real").Bind(complexReal),
+		builder.Scalar("comp_imag").Bind(complexImag),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define bindings: %v", err)
@@ -387,7 +391,8 @@ func TestRunner_ScalarParameters(t *testing.T) {
 		kp.Param("result").CopyBack(),
 		kp.Param("pi"),
 		kp.Param("answer"),
-		kp.Param("comp"),
+		kp.Param("comp_real"),
+		kp.Param("comp_imag"),
 	)
 	if err != nil {
 		t.Fatalf("Failed to configure kernel: %v", err)
@@ -404,7 +409,7 @@ func TestRunner_ScalarParameters(t *testing.T) {
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
-				result[i] = pi + (double)answer + comp.x + comp.y;
+				result[i] = pi + (double)answer + comp_real + comp_imag;
 			}
 		}
 	}
@@ -421,7 +426,7 @@ func TestRunner_ScalarParameters(t *testing.T) {
 	}
 
 	// Verify
-	expected := floatVal + float64(intVal) + real(complexVal) + imag(complexVal)
+	expected := floatVal + float64(intVal) + complexReal + complexImag
 	for i := 0; i < 10; i++ {
 		if math.Abs(result[i]-expected) > 1e-10 {
 			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
