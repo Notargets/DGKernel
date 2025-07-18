@@ -353,12 +353,14 @@ func calcPhysicalDerivative(U, Rx, Ry, Rz, Sx, Sy, Sz, Tx, Ty, Tz, Dr, Ds, Dt ma
 	DuDx = make([]float64, totalNodes)
 	DuDy = make([]float64, totalNodes)
 	DuDz = make([]float64, totalNodes)
-	for K := 0; K < cols; K++ {
-		for j := 0; j < rows; j++ {
-			i := j + K*rows
+	// row-major
+	var i int
+	for j := 0; j < rows; j++ {
+		for K := 0; K < cols; K++ {
 			DuDx[i] = Rx.At(j, K)*Ur.At(j, K) + Sx.At(j, K)*Us.At(j, K) + Tx.At(j, K)*Ut.At(j, K)
 			DuDy[i] = Ry.At(j, K)*Ur.At(j, K) + Sy.At(j, K)*Us.At(j, K) + Ty.At(j, K)*Ut.At(j, K)
 			DuDz[i] = Rz.At(j, K)*Ur.At(j, K) + Sz.At(j, K)*Us.At(j, K) + Tz.At(j, K)*Ut.At(j, K)
+			i++
 		}
 	}
 	return
@@ -890,14 +892,6 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 }
 `, tn.Np, kernelName, signature,
 		props.ShortName, props.ShortName, props.ShortName)
-	// for K := 0; K < cols; K++ {
-	// 	for j := 0; j < rows; j++ {
-	// 		i := j + K*rows
-	// 		DuDx[i] = Rx.At(j, K)*Ur.At(j, K) + Sx.At(j, K)*Us.At(j, K) + Tx.At(j, K)*Ut.At(j, K)
-	// 		DuDy[i] = Ry.At(j, K)*Ur.At(j, K) + Sy.At(j, K)*Us.At(j, K) + Ty.At(j, K)*Ut.At(j, K)
-	// 		DuDz[i] = Rz.At(j, K)*Ur.At(j, K) + Sz.At(j, K)*Us.At(j, K) + Tz.At(j, K)*Ut.At(j, K)
-	// 	}
-	// }
 
 	_, err = kp.BuildKernel(kernelSource, kernelName)
 	if err != nil {
@@ -911,16 +905,12 @@ func TestTetNudgPhysicalDerivative(t *testing.T) {
 	}
 
 	// Calculate host reference
-	// DuDxH, DuDyH, DuDzH := calcPhysicalDerivative(U, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
-	// 	tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
-	// PrintMatrix("DuDxH", mat.NewDense(Np, Ktot, DuDxH))
-	// PrintMatrix("DuDx", DuDx)
-	// PrintMatrix("DuDxExpected", DuDxExpected)
-	// os.Exit(1)
-	// assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDxH, 1.e-8, "")
-	// assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDyH, 1.e-8, "")
-	// assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzH, 1.e-8, "")
-	// fmt.Println("Host calculation of physical derivative validates")
+	DuDxH, DuDyH, DuDzH := calcPhysicalDerivative(U, tn.Rx, tn.Ry, tn.Rz, tn.Sx,
+		tn.Sy, tn.Sz, tn.Tx, tn.Ty, tn.Tz, tn.Dr, tn.Ds, tn.Dt)
+	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDxH, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDyH, 1.e-8, "")
+	assert.InDeltaSlicef(t, DuDzExpected.RawMatrix().Data, DuDzH, 1.e-8, "")
+	fmt.Println("Host calculation of physical derivative validates")
 
 	assert.InDeltaSlicef(t, DuDxExpected.RawMatrix().Data, DuDx.RawMatrix().Data, 1.e-8, "")
 	assert.InDeltaSlicef(t, DuDyExpected.RawMatrix().Data, DuDy.RawMatrix().Data, 1.e-8, "")
