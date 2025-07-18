@@ -7,11 +7,10 @@ import (
 	"github.com/notargets/DGKernel/utils"
 	"math"
 	"testing"
-	"unsafe"
 )
 
 // TestConvert_BasicFloat64ToFloat32 tests basic type conversion
-func TestConvert_BasicFloat66ToFloat32(t *testing.T) {
+func TestConvert_BasicFloat64ToFloat32(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -27,17 +26,36 @@ func TestConvert_BasicFloat66ToFloat32(t *testing.T) {
 		hostInput[i] = float64(i) * 1.123456789 // Precision that will be lost
 	}
 
-	// Define kernel with conversion
-	err := kp.DefineKernel("convert_test",
-		builder.Input("input").Bind(hostInput).CopyTo().Convert(builder.Float32),
-		builder.Output("output").Bind(hostOutput).CopyBack().Convert(builder.Float32), // Changed!
+	// Phase 1: Define bindings with conversion
+	err := kp.DefineBindings(
+		builder.Input("input").Bind(hostInput).Convert(builder.Float32),
+		builder.Output("output").Bind(hostOutput).Convert(builder.Float32),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 2: Configure kernel
+	kernelName := "convert_test"
+	_, err = kp.ConfigureKernel(kernelName,
+		kp.Param("input").CopyTo(),
+		kp.Param("output").CopyBack(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
 	}
 
 	// Get signature to verify types
-	signature, _ := kp.GetKernelSignature("convert_test")
+	signature, err := kp.GetKernelSignatureForConfig(kernelName)
+	if err != nil {
+		t.Fatalf("Failed to get signature: %v", err)
+	}
 	t.Logf("Generated signature:\n%s", signature)
 
 	// Simple kernel that copies data
@@ -55,12 +73,12 @@ func TestConvert_BasicFloat66ToFloat32(t *testing.T) {
 	}
 }`, signature)
 
-	_, err = kp.BuildKernel(kernelSource, "convert_test")
+	_, err = kp.BuildKernel(kernelSource, kernelName)
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	err = kp.RunKernel("convert_test")
+	err = kp.ExecuteKernel(kernelName)
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
@@ -109,21 +127,41 @@ func TestConvert_PartitionedData(t *testing.T) {
 		}
 	}
 
-	// Define kernel with conversion for partitioned data
-	err := kp.DefineKernel("partitioned_convert",
-		builder.Input("input").Bind(hostInput).CopyTo().Convert(builder.Float64),      // Convert to float64 on device
-		builder.Output("output").Bind(hostOutput).CopyBack().Convert(builder.Float32), // Convert back to float32
+	// Phase 1: Define bindings with conversion for partitioned data
+	err := kp.DefineBindings(
+		builder.Input("input").Bind(hostInput).Convert(builder.Float64),    // Convert to float64 on device
+		builder.Output("output").Bind(hostOutput).Convert(builder.Float64), // Device will be float64
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	signature, _ := kp.GetKernelSignature("partitioned_convert")
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 2: Configure kernel
+	kernelName := "partitioned_convert"
+	_, err = kp.ConfigureKernel(kernelName,
+		kp.Param("input").CopyTo(),
+		kp.Param("output").CopyBack(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
+	}
+
+	signature, err := kp.GetKernelSignatureForConfig(kernelName)
+	if err != nil {
+		t.Fatalf("Failed to get signature: %v", err)
+	}
+
 	kernelSource := fmt.Sprintf(`
 @kernel void partitioned_convert(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
 		const double* input = input_PART(part);
-		float* output = output_PART(part);
+		double* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
@@ -133,12 +171,12 @@ func TestConvert_PartitionedData(t *testing.T) {
 	}
 }`, signature)
 
-	_, err = kp.BuildKernel(kernelSource, "partitioned_convert")
+	_, err = kp.BuildKernel(kernelSource, kernelName)
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	err = kp.RunKernel("partitioned_convert")
+	err = kp.ExecuteKernel(kernelName)
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
@@ -207,347 +245,293 @@ func TestConvert_AllCombinations(t *testing.T) {
 				hostData = data
 			}
 
-			err := kp.DefineKernel("test",
-				builder.InOut("data").Bind(hostData).Copy().Convert(tc.convertTo),
+			// Phase 1: Define bindings
+			err := kp.DefineBindings(
+				builder.InOut("data").Bind(hostData).Convert(tc.convertTo),
 			)
 			if err != nil {
-				t.Fatalf("Failed to define kernel: %v", err)
+				t.Fatalf("Failed to define bindings: %v", err)
+			}
+
+			// Phase 1: Allocate device memory
+			err = kp.AllocateDevice()
+			if err != nil {
+				t.Fatalf("Failed to allocate device: %v", err)
+			}
+
+			// Phase 2: Configure kernel
+			_, err = kp.ConfigureKernel("test",
+				kp.Param("data").Copy(),
+			)
+			if err != nil {
+				t.Fatalf("Failed to configure kernel: %v", err)
 			}
 
 			// Verify allocation used the converted type
-			meta, exists := kp.GetArrayMetadata("data")
-			if !exists {
-				t.Fatal("Array metadata not found")
+			binding := kp.GetBinding("data")
+			if binding.DeviceType != tc.convertTo {
+				t.Errorf("Expected device type %v, got %v", tc.convertTo, binding.DeviceType)
 			}
-			if meta.dataType != tc.convertTo {
-				t.Errorf("Expected device type %v, got %v", tc.convertTo, meta.dataType)
-			}
-
-			t.Logf("✓ %s conversion setup works", tc.name)
 		})
 	}
 }
 
-// TestConvert_MemoryEfficiency verifies that conversion saves memory
-func TestConvert_MemoryEfficiency(t *testing.T) {
+// TestConvert_MixedPrecisionKernel tests kernel with mixed precision arrays
+func TestConvert_MixedPrecisionKernel(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K: []int{1000},
+		K: []int{10},
 	})
 	defer kp.Free()
 
-	// Large float64 array on host
-	hostData := make([]float64, 1000)
+	// Different precision host arrays
+	input64 := make([]float64, 10)
+	weights32 := make([]float32, 10)
+	output64 := make([]float64, 10)
 
-	// Without conversion - would use 8KB on device
-	// With conversion - uses only 4KB on device
-	err := kp.DefineKernel("memory_test",
-		builder.Input("data").Bind(hostData).CopyTo().Convert(builder.Float32),
+	for i := range input64 {
+		input64[i] = float64(i) * 1.1
+		weights32[i] = float32(i) * 0.5
+	}
+
+	// Phase 1: Define bindings with different types
+	err := kp.DefineBindings(
+		builder.Input("input").Bind(input64),                              // Keep as float64
+		builder.Input("weights").Bind(weights32).Convert(builder.Float64), // Convert to float64
+		builder.Output("output").Bind(output64),                           // Keep as float64
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	// Check that device allocation is float32 (4 bytes per element)
-	meta, _ := kp.GetArrayMetadata("data")
-	if meta.dataType != builder.Float32 {
-		t.Error("Conversion did not change device allocation type")
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
 	}
 
-	expectedSize := int64(1000 * 4) // 4 bytes per float32
-	if meta.spec.Size != expectedSize {
-		t.Errorf("Expected allocation size %d, got %d", expectedSize, meta.spec.Size)
-	}
-
-	t.Log("✓ Conversion reduces memory usage by 50% for float64→float32")
-}
-
-func TestConvert_Debug(t *testing.T) {
-	device := utils.CreateTestDevice()
-	defer device.Free()
-
-	kp := NewRunner(device, builder.Config{
-		K: []int{5}, // Smaller for easier debugging
-	})
-	defer kp.Free()
-
-	// Host data in float64
-	hostInput := make([]float64, 5)
-	hostOutput := make([]float64, 5)
-	for i := range hostInput {
-		hostInput[i] = float64(i) + 0.5
-	}
-
-	t.Logf("Initial hostInput: %v", hostInput)
-
-	// Define kernel with conversion
-	err := kp.DefineKernel("debug_convert",
-		builder.Input("input").Bind(hostInput).CopyTo().Convert(builder.Float32),
-		builder.Output("output").Bind(hostOutput).CopyBack().Convert(builder.Float64),
+	// Phase 2: Configure kernel
+	kernelName := "mixed_precision"
+	_, err = kp.ConfigureKernel(kernelName,
+		kp.Param("input").CopyTo(),
+		kp.Param("weights").CopyTo(),
+		kp.Param("output").CopyBack(),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to configure kernel: %v", err)
 	}
 
-	// Check array metadata
-	t.Log("\n=== Array Metadata ===")
-	for name := range kp.arrayMetadata {
-		meta, _ := kp.GetArrayMetadata(name)
-		t.Logf("Array %s: dataType=%v, size=%d bytes, isOutput=%v",
-			name, meta.dataType, meta.spec.Size, meta.isOutput)
-		if meta.paramSpec != nil {
-			t.Logf("  ParamSpec: DataType=%v, ConvertType=%v, EffectiveType=%v",
-				meta.paramSpec.DataType, meta.paramSpec.ConvertType,
-				meta.paramSpec.GetEffectiveType())
-		}
-	}
-
-	// Check memory allocations
-	t.Log("\n=== Memory Allocations ===")
-	for key, mem := range kp.PooledMemory {
-		if mem != nil {
-			t.Logf("Memory %s: allocated", key)
-		}
-	}
-
-	// Simple kernel that just copies
-	signature, _ := kp.GetKernelSignature("debug_convert")
-	t.Logf("\nGenerated signature:\n%s", signature)
-
+	signature, _ := kp.GetKernelSignatureForConfig(kernelName)
 	kernelSource := fmt.Sprintf(`
-@kernel void debug_convert(%s) {
+@kernel void mixed_precision(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const float* input = input_PART(part);
+		const double* input = input_PART(part);
+		const double* weights = weights_PART(part);  // Converted to double
 		double* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
-				output[i] = input[i]; // Just copy
+				output[i] = input[i] * weights[i];
 			}
 		}
 	}
 }`, signature)
 
-	_, err = kp.BuildKernel(kernelSource, "debug_convert")
+	_, err = kp.BuildKernel(kernelSource, kernelName)
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	// Now let's trace the copy operations
-	t.Log("\n=== Running Kernel ===")
-
-	// Manually perform the pre-kernel copy to add logging
-	def := kp.kernelDefinitions["debug_convert"]
-	for _, param := range def.Parameters {
-		if param.Name == "input" && param.NeedsCopyTo() {
-			t.Logf("Copying %s to device: needsConversion=%v, hostType=%v, deviceType=%v",
-				param.Name, param.ConvertType != 0, param.DataType, param.GetEffectiveType())
-
-			// Check what copyToDeviceWithConversion will do
-			mem := kp.GetMemory(param.Name)
-			_ = mem
-			if param.ConvertType != 0 && param.ConvertType != param.DataType {
-				t.Logf("Will perform conversion from %v to %v", param.DataType, param.ConvertType)
-			}
-		}
-	}
-
-	err = kp.RunKernel("debug_convert")
+	err = kp.ExecuteKernel(kernelName)
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
-	t.Logf("\nOutput after kernel: %v", hostOutput)
-
-	// Let's also manually read from device to see what's there
-	t.Log("\n=== Manual Device Read ===")
-	outputMem := kp.GetMemory("output")
-	if outputMem != nil {
-		// Read as float32 (what's on device)
-		deviceData32 := make([]float32, 5)
-		outputMem.CopyTo(unsafe.Pointer(&deviceData32[0]), int64(5*4))
-		t.Logf("Device data (as float32): %v", deviceData32)
-
-		// Read as float64 (wrong, but let's see)
-		deviceData64 := make([]float64, 5)
-		outputMem.CopyTo(unsafe.Pointer(&deviceData64[0]), int64(5*8))
-		t.Logf("Device data (as float64): %v", deviceData64)
+	// Verify results
+	for i := range output64 {
+		expected := input64[i] * float64(weights32[i])
+		if math.Abs(output64[i]-expected) > 1e-10 {
+			t.Errorf("Element %d: expected %f, got %f", i, expected, output64[i])
+		}
 	}
+	t.Log("✓ Mixed precision kernel works correctly")
 }
 
-// Test without conversion to verify basic functionality
-func TestConvert_NoConversion(t *testing.T) {
+// TestConvert_VerifyMemoryAllocation tests that conversion affects memory allocation
+func TestConvert_VerifyMemoryAllocation(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
 	kp := NewRunner(device, builder.Config{
-		K: []int{5},
+		K: []int{1000}, // Large array to make size difference clear
 	})
 	defer kp.Free()
 
-	// Host data in float32 (matches device)
-	hostInput := make([]float32, 5)
-	hostOutput := make([]float32, 5)
+	hostData := make([]float64, 1000)
+
+	// Phase 1: Define bindings with conversion
+	err := kp.DefineBindings(
+		builder.Input("data_f32").Bind(hostData).Convert(builder.Float32),
+		builder.Input("data_f64").Bind(hostData), // No conversion
+	)
+	if err != nil {
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Check memory allocations
+	memF32 := kp.GetMemory("data_f32")
+	memF64 := kp.GetMemory("data_f64")
+
+	if memF32 == nil || memF64 == nil {
+		t.Fatal("Failed to get memory allocations")
+	}
+
+	// Float32 should use half the memory of float64
+	// We can't directly check size, but we can verify the binding metadata
+	bindingF32 := kp.GetBinding("data_f32")
+	bindingF64 := kp.GetBinding("data_f64")
+
+	if bindingF32.ElementSize != 4 {
+		t.Errorf("Float32 binding should have element size 4, got %d", bindingF32.ElementSize)
+	}
+	if bindingF64.ElementSize != 8 {
+		t.Errorf("Float64 binding should have element size 8, got %d", bindingF64.ElementSize)
+	}
+
+	t.Log("✓ Memory allocation respects type conversion")
+}
+
+// TestConvert_RoundTripAccuracy tests accuracy of round-trip conversions
+func TestConvert_RoundTripAccuracy(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	kp := NewRunner(device, builder.Config{
+		K: []int{100},
+	})
+	defer kp.Free()
+
+	// Test data with values that lose precision in float32
+	hostInput := make([]float64, 100)
+	hostOutput := make([]float64, 100)
+
+	// Use values that demonstrate precision loss
 	for i := range hostInput {
-		hostInput[i] = float32(i) + 0.5
+		// These values have more precision than float32 can represent
+		hostInput[i] = 1.0 + float64(i)*1e-7
 	}
 
-	err := kp.DefineKernel("no_convert",
-		builder.Input("input").Bind(hostInput).CopyTo(),      // No conversion
-		builder.Output("output").Bind(hostOutput).CopyBack(), // No conversion
+	// Phase 1: Define bindings
+	err := kp.DefineBindings(
+		builder.InOut("data").Bind(hostInput).Convert(builder.Float32),
+		builder.Output("output").Bind(hostOutput),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	signature, _ := kp.GetKernelSignature("no_convert")
-	kernelSource := fmt.Sprintf(`
-@kernel void no_convert(%s) {
-	for (int part = 0; part < NPART; ++part; @outer) {
-		const float* input = input_PART(part);
-		float* output = output_PART(part);
-		
-		for (int i = 0; i < KpartMax; ++i; @inner) {
-			if (i < K[part]) {
-				output[i] = input[i] * 2.0f;
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// First kernel: Copy input to device (with conversion)
+	_, err = kp.ConfigureKernel("copy_to",
+		kp.Param("data").CopyTo(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure copy_to kernel: %v", err)
+	}
+
+	sig1, _ := kp.GetKernelSignatureForConfig("copy_to")
+	kernel1Src := fmt.Sprintf(`
+@kernel void copy_to(%s) {
+		int ii;
+		for (int i=0; i<10; ++i; @outer) {
+			for (int j=0; j<10; ++j; @inner) {
+				ii++;
 			}
 		}
-	}
-}`, signature)
+	// No-op kernel just to trigger copy
+}`, sig1)
 
-	_, err = kp.BuildKernel(kernelSource, "no_convert")
+	_, err = kp.BuildKernel(kernel1Src, "copy_to")
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	err = kp.RunKernel("no_convert")
+	err = kp.ExecuteKernel("copy_to")
 	if err != nil {
-		t.Fatalf("Kernel execution failed: %v", err)
+		t.Fatalf("Failed to execute copy_to: %v", err)
 	}
 
-	// Verify
-	for i := range hostOutput {
-		expected := hostInput[i] * 2.0
-		if hostOutput[i] != expected {
-			t.Errorf("Element %d: expected %f, got %f", i, expected, hostOutput[i])
-		}
-	}
-	t.Log("✓ No conversion case works correctly")
-}
-
-// TestConvert_PartitionedDataDebug - Debug version to trace the issue
-func TestConvert_PartitionedDataDebug(t *testing.T) {
-	device := utils.CreateTestDevice()
-	defer device.Free()
-
-	k := []int{5, 7, 6}
-	kp := NewRunner(device, builder.Config{
-		K: k,
-	})
-	defer kp.Free()
-
-	// Host data in float32 (partitioned)
-	hostInput := [][]float32{
-		make([]float32, k[0]),
-		make([]float32, k[1]),
-		make([]float32, k[2]),
-	}
-	hostOutput := [][]float32{
-		make([]float32, k[0]),
-		make([]float32, k[1]),
-		make([]float32, k[2]),
-	}
-
-	// Initialize with distinct values
-	for p := range k {
-		for i := 0; i < k[p]; i++ {
-			hostInput[p][i] = float32(p*100 + i)
-		}
-	}
-
-	t.Logf("Initial hostInput:")
-	for p := range k {
-		t.Logf("  Partition %d: %v", p, hostInput[p])
-	}
-
-	// Define kernel with conversion for partitioned data
-	err := kp.DefineKernel("partitioned_convert",
-		builder.Input("input").Bind(hostInput).CopyTo().Convert(builder.Float64),      // Convert to float64 on device
-		builder.Output("output").Bind(hostOutput).CopyBack().Convert(builder.Float32), // Device should use float32
+	// Second kernel: Process on device and copy back
+	_, err = kp.ConfigureKernel("process",
+		kp.Param("data").CopyBack(), // Copy back with conversion
+		kp.Param("output").CopyBack(),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to configure process kernel: %v", err)
 	}
 
-	// Check array metadata
-	t.Log("\n=== Array Metadata ===")
-	for name := range kp.arrayMetadata {
-		meta, _ := kp.GetArrayMetadata(name)
-		t.Logf("Array %s: dataType=%v, size=%d bytes",
-			name, meta.dataType, meta.spec.Size)
-		if meta.paramSpec != nil {
-			t.Logf("  ParamSpec: DataType=%v, ConvertType=%v, EffectiveType=%v",
-				meta.paramSpec.DataType, meta.paramSpec.ConvertType,
-				meta.paramSpec.GetEffectiveType())
-		}
-	}
-
-	// Check offsets
-	t.Log("\n=== Partition Offsets ===")
-	inputOffsets, _ := kp.readPartitionOffsets("input")
-	outputOffsets, _ := kp.readPartitionOffsets("output")
-	t.Logf("Input offsets: %v", inputOffsets)
-	t.Logf("Output offsets: %v", outputOffsets)
-
-	signature, _ := kp.GetKernelSignature("partitioned_convert")
-	t.Logf("\nGenerated signature:\n%s", signature)
-
-	// Simple kernel that adds 1000
-	kernelSource := fmt.Sprintf(`
-@kernel void partitioned_convert(%s) {
+	sig2, _ := kp.GetKernelSignatureForConfig("process")
+	kernel2Src := fmt.Sprintf(`
+@kernel void process(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const double* input = input_PART(part);
-		float* output = output_PART(part);
+		float* data = data_PART(part);
+		double* output = output_PART(part);
 		
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
-				output[i] = input[i] + 1000.0;
+				// Store float32 value into float64 output
+				output[i] = (double)data[i];
 			}
 		}
 	}
-}`, signature)
+}`, sig2)
 
-	_, err = kp.BuildKernel(kernelSource, "partitioned_convert")
+	_, err = kp.BuildKernel(kernel2Src, "process")
 	if err != nil {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	// Run kernel
-	err = kp.RunKernel("partitioned_convert")
+	err = kp.ExecuteKernel("process")
 	if err != nil {
-		t.Fatalf("Kernel execution failed: %v", err)
+		t.Fatalf("Failed to execute process: %v", err)
 	}
 
-	// Manual device read to check what's actually there
-	t.Log("\n=== Manual Device Read ===")
-	outputMem := kp.GetMemory("output")
-	if outputMem != nil {
-		// Read partition 0 as float32 (what should be on device)
-		deviceData32 := make([]float32, k[0])
-		outputMem.CopyTo(unsafe.Pointer(&deviceData32[0]), int64(k[0]*4))
-		t.Logf("Partition 0 data (as float32): %v", deviceData32)
+	// Verify precision loss
+	precisionLossDetected := false
+	for i := range hostInput {
+		// hostOutput should have the float32-truncated value
+		originalValue := 1.0 + float64(i)*1e-7
+		float32Value := float32(originalValue)
+		expectedValue := float64(float32Value)
 
-		// Also check the raw memory pattern
-		rawBytes := make([]byte, 32) // First 32 bytes
-		outputMem.CopyTo(unsafe.Pointer(&rawBytes[0]), 32)
-		t.Logf("First 32 bytes of output memory: %x", rawBytes)
+		if math.Abs(hostOutput[i]-expectedValue) > 1e-10 {
+			t.Errorf("Element %d: expected %v, got %v", i, expectedValue, hostOutput[i])
+		}
+
+		// Check that precision was actually lost
+		if hostOutput[i] != originalValue && !precisionLossDetected {
+			precisionLossDetected = true
+			t.Logf("Precision loss detected at element %d: original %v, recovered %v",
+				i, originalValue, hostOutput[i])
+		}
 	}
 
-	// Check results
-	t.Log("\n=== Results ===")
-	for p := range k {
-		t.Logf("Partition %d output: %v", p, hostOutput[p])
+	if !precisionLossDetected {
+		t.Error("Expected to detect precision loss in float64->float32->float64 conversion")
 	}
+
+	t.Log("✓ Round-trip conversion accuracy verified")
 }

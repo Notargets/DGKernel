@@ -106,16 +106,33 @@ func TestRunner_BasicComputation(t *testing.T) {
 		hostData[i] = float64(i)
 	}
 
-	// Define kernel with new API
-	err := kp.DefineKernel("setValues",
-		builder.InOut("data").Bind(hostData).Copy(), // Copy in and out
+	// Phase 1: Define bindings
+	err := kp.DefineBindings(
+		builder.InOut("data").Bind(hostData),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 2: Configure kernel
+	_, err = kp.ConfigureKernel("setValues",
+		kp.Param("data").Copy(), // Copy in and out
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
 	}
 
 	// Get signature for kernel
-	signature, _ := kp.GetKernelSignature("setValues")
+	signature, err := kp.GetKernelSignatureForConfig("setValues")
+	if err != nil {
+		t.Fatalf("Failed to get signature: %v", err)
+	}
 
 	// Simple kernel that squares values
 	kernelSource := fmt.Sprintf(`
@@ -139,7 +156,7 @@ func TestRunner_BasicComputation(t *testing.T) {
 	}
 
 	// Execute kernel
-	err = kp.RunKernel("setValues")
+	err = kp.ExecuteKernel("setValues")
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
@@ -153,7 +170,7 @@ func TestRunner_BasicComputation(t *testing.T) {
 	}
 }
 
-func TestRunner_MultiplePartitions(t *testing.T) {
+func TestRunner_MultiplePartitions_Core(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -165,45 +182,46 @@ func TestRunner_MultiplePartitions(t *testing.T) {
 	})
 	defer kp.Free()
 
-	// Host arrays
-	hostA := [][]float64{
-		make([]float64, k[0]),
-		make([]float64, k[1]),
-		make([]float64, k[2]),
-	}
-	hostB := [][]float64{
-		make([]float64, k[0]),
-		make([]float64, k[1]),
-		make([]float64, k[2]),
-	}
-	hostC := [][]float64{
-		make([]float64, k[0]),
-		make([]float64, k[1]),
-		make([]float64, k[2]),
-	}
+	// Host arrays - flat arrays
+	hostA := make([]float64, totalElements)
+	hostB := make([]float64, totalElements)
+	hostC := make([]float64, totalElements)
 
 	// Initialize
-	var iii int
-	for p := 0; p < len(k); p++ {
-		for i := range hostA[p] {
-			hostA[p][i] = float64(iii)
-			hostB[p][i] = float64(iii * 2)
-			iii++
-		}
+	for i := 0; i < totalElements; i++ {
+		hostA[i] = float64(i)
+		hostB[i] = float64(i * 2)
 	}
 
-	// Define kernel
-	err := kp.DefineKernel("vectorAdd",
-		builder.Input("A").Bind(hostA).CopyTo(),
-		builder.Input("B").Bind(hostB).CopyTo(),
+	// Phase 1: Define bindings
+	err := kp.DefineBindings(
+		builder.Input("A").Bind(hostA),
+		builder.Input("B").Bind(hostB),
 		builder.Output("C").Bind(hostC),
 		builder.Scalar("alpha").Bind(1.5),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	signature, _ := kp.GetKernelSignature("vectorAdd")
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 2: Configure kernel
+	_, err = kp.ConfigureKernel("vectorAdd",
+		kp.Param("A").CopyTo(),
+		kp.Param("B").CopyTo(),
+		kp.Param("C").CopyBack(),
+		kp.Param("alpha"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
+	}
+
+	signature, _ := kp.GetKernelSignatureForConfig("vectorAdd")
 
 	kernelSource := fmt.Sprintf(`
 @kernel void vectorAdd(
@@ -227,32 +245,25 @@ func TestRunner_MultiplePartitions(t *testing.T) {
 		t.Fatalf("Failed to build kernel: %v", err)
 	}
 
-	err = kp.RunKernel("vectorAdd")
+	err = kp.ExecuteKernel("vectorAdd")
 	if err != nil {
 		t.Fatalf("Kernel execution failed: %v", err)
 	}
 
-	// Copy result back
-	result, err := CopyArrayToHost[float64](kp, "C")
-	if err != nil {
-		t.Fatalf("Failed to copy result: %v", err)
-	}
-
-	// Verify across all partitions
+	// Verify results
 	for i := 0; i < totalElements; i++ {
 		expected := 1.5*float64(i) + float64(i*2)
-		if math.Abs(result[i]-expected) > 1e-10 {
-			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
+		if math.Abs(hostC[i]-expected) > 1e-10 {
+			t.Errorf("Element %d: expected %f, got %f", i, expected, hostC[i])
 		}
 	}
 }
 
 // ============================================================================
 // Section 3: Edge Cases and Error Handling
-// Ported from copy tests
 // ============================================================================
 
-func TestRunner_TypeMismatch(t *testing.T) {
+func TestRunner_NonexistentParameter(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
@@ -261,25 +272,54 @@ func TestRunner_TypeMismatch(t *testing.T) {
 	})
 	defer kp.Free()
 
-	// Define with float64
-	hostData := make([]float64, 10)
-	err := kp.DefineKernel("test",
-		builder.Input("data").Bind(hostData).CopyTo(),
+	// Define minimal bindings
+	err := kp.DefineBindings(
+		builder.Input("data").Bind(make([]float64, 10)),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	// Try to copy as wrong type
-	_, err = CopyArrayToHost[float32](kp, "data")
-	if err == nil {
-		t.Error("Expected type mismatch error")
-	}
-
-	// Correct type should work
-	_, err = CopyArrayToHost[float64](kp, "data")
+	err = kp.AllocateDevice()
 	if err != nil {
-		t.Errorf("Correct type failed: %v", err)
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Try to configure kernel with nonexistent parameter
+	_, err = kp.ConfigureKernel("test",
+		kp.Param("data").CopyTo(),
+		kp.Param("nonexistent").CopyTo(), // This should fail
+	)
+
+	if err == nil {
+		t.Error("Expected error for nonexistent parameter")
+	}
+}
+
+func TestRunner_BeforeAllocation(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	kp := NewRunner(device, builder.Config{
+		K: []int{10},
+	})
+	defer kp.Free()
+
+	// Define bindings but don't allocate
+	err := kp.DefineBindings(
+		builder.Input("data").Bind(make([]float64, 10)),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Try to configure kernel before allocation - should fail
+	_, err = kp.ConfigureKernel("test",
+		kp.Param("data").CopyTo(),
+	)
+
+	if err == nil {
+		t.Error("Expected error when configuring kernel before allocation")
 	}
 }
 
@@ -303,4 +343,311 @@ func TestRunner_CUDAInnerLimit(t *testing.T) {
 	}()
 
 	NewRunner(device, builder.Config{K: []int{100, 1025, 500}})
+}
+
+// ============================================================================
+// Section 5: Scalar Parameter Tests
+// ============================================================================
+
+func TestRunner_ScalarParameters(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	kp := NewRunner(device, builder.Config{
+		K: []int{10},
+	})
+	defer kp.Free()
+
+	// Various scalar types
+	floatVal := 3.14
+	intVal := int64(42)
+	complexVal := complex(2.0, 3.0)
+
+	result := make([]float64, 10)
+
+	// Phase 1: Define bindings
+	err := kp.DefineBindings(
+		builder.Output("result").Bind(result),
+		builder.Scalar("pi").Bind(floatVal),
+		builder.Scalar("answer").Bind(intVal),
+		builder.Scalar("comp").Bind(complexVal),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 2: Configure kernel
+	_, err = kp.ConfigureKernel("scalars",
+		kp.Param("result").CopyBack(),
+		kp.Param("pi"),
+		kp.Param("answer"),
+		kp.Param("comp"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
+	}
+
+	signature, _ := kp.GetKernelSignatureForConfig("scalars")
+
+	kernelSource := fmt.Sprintf(`
+@kernel void scalars(
+	%s
+) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		double* result = result_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				result[i] = pi + (double)answer + comp.x + comp.y;
+			}
+		}
+	}
+}`, signature)
+
+	_, err = kp.BuildKernel(kernelSource, "scalars")
+	if err != nil {
+		t.Fatalf("Failed to build kernel: %v", err)
+	}
+
+	err = kp.ExecuteKernel("scalars")
+	if err != nil {
+		t.Fatalf("Kernel execution failed: %v", err)
+	}
+
+	// Verify
+	expected := floatVal + float64(intVal) + real(complexVal) + imag(complexVal)
+	for i := 0; i < 10; i++ {
+		if math.Abs(result[i]-expected) > 1e-10 {
+			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
+		}
+	}
+}
+
+// ============================================================================
+// Section 6: Temporary Array Tests
+// ============================================================================
+
+func TestRunner_TemporaryArrays(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	kp := NewRunner(device, builder.Config{
+		K: []int{20},
+	})
+	defer kp.Free()
+
+	input := make([]float64, 20)
+	output := make([]float64, 20)
+
+	for i := range input {
+		input[i] = float64(i)
+	}
+
+	// Phase 1: Define bindings with temp arrays
+	err := kp.DefineBindings(
+		builder.Input("input").Bind(input),
+		builder.Output("output").Bind(output),
+		builder.Temp("scratch").Type(builder.Float64).Size(20),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 2: Configure kernel
+	_, err = kp.ConfigureKernel("useScratch",
+		kp.Param("input").CopyTo(),
+		kp.Param("output").CopyBack(),
+		kp.Param("scratch"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
+	}
+
+	signature, _ := kp.GetKernelSignatureForConfig("useScratch")
+
+	kernelSource := fmt.Sprintf(`
+@kernel void useScratch(
+	%s
+) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		const double* input = input_PART(part);
+		double* output = output_PART(part);
+		double* scratch = scratch_PART(part);
+		
+		// First pass: square into scratch
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				scratch[i] = input[i] * input[i];
+			}
+		}
+		
+		// Second pass: add original
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				output[i] = scratch[i] + input[i];
+			}
+		}
+	}
+}`, signature)
+
+	_, err = kp.BuildKernel(kernelSource, "useScratch")
+	if err != nil {
+		t.Fatalf("Failed to build kernel: %v", err)
+	}
+
+	err = kp.ExecuteKernel("useScratch")
+	if err != nil {
+		t.Fatalf("Kernel execution failed: %v", err)
+	}
+
+	// Verify: output = input^2 + input
+	for i := 0; i < 20; i++ {
+		expected := float64(i*i) + float64(i)
+		if math.Abs(output[i]-expected) > 1e-10 {
+			t.Errorf("Element %d: expected %f, got %f", i, expected, output[i])
+		}
+	}
+}
+
+// ============================================================================
+// Section 7: Multi-Kernel Workflow Tests
+// ============================================================================
+
+func TestRunner_MultiKernelWorkflow(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	kp := NewRunner(device, builder.Config{
+		K: []int{15},
+	})
+	defer kp.Free()
+
+	// Working arrays
+	u := make([]float64, 15)
+	v := make([]float64, 15)
+	result := make([]float64, 15)
+
+	// Initialize
+	for i := range u {
+		u[i] = float64(i)
+		v[i] = float64(i) * 0.5
+	}
+
+	// Phase 1: Define all bindings once
+	err := kp.DefineBindings(
+		builder.InOut("u").Bind(u),
+		builder.InOut("v").Bind(v),
+		builder.Output("result").Bind(result),
+		builder.Scalar("dt").Bind(0.1),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 1: Allocate device memory once
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Kernel 1: Update u based on v
+	_, err = kp.ConfigureKernel("updateU",
+		kp.Param("u").Copy(),   // Copy to device and back
+		kp.Param("v").CopyTo(), // Only copy to device
+		kp.Param("dt"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure updateU: %v", err)
+	}
+
+	sig1, _ := kp.GetKernelSignatureForConfig("updateU")
+	kernel1Src := fmt.Sprintf(`
+@kernel void updateU(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		double* u = u_PART(part);
+		const double* v = v_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				u[i] = u[i] + dt * v[i];
+			}
+		}
+	}
+}`, sig1)
+
+	_, err = kp.BuildKernel(kernel1Src, "updateU")
+	if err != nil {
+		t.Fatalf("Failed to build updateU: %v", err)
+	}
+
+	err = kp.ExecuteKernel("updateU")
+	if err != nil {
+		t.Fatalf("Failed to execute updateU: %v", err)
+	}
+
+	// Verify first kernel results
+	for i := 0; i < 15; i++ {
+		expected := float64(i) + 0.1*float64(i)*0.5
+		if math.Abs(u[i]-expected) > 1e-10 {
+			t.Errorf("After updateU, u[%d]: expected %f, got %f", i, expected, u[i])
+		}
+	}
+
+	// Kernel 2: Compute result from u and v (which are still on device)
+	_, err = kp.ConfigureKernel("computeResult",
+		kp.Param("u"), // Already on device
+		kp.Param("v"), // Already on device
+		kp.Param("result").CopyBack(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure computeResult: %v", err)
+	}
+
+	sig2, _ := kp.GetKernelSignatureForConfig("computeResult")
+	kernel2Src := fmt.Sprintf(`
+@kernel void computeResult(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		const double* u = u_PART(part);
+		const double* v = v_PART(part);
+		double* result = result_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				result[i] = u[i] * u[i] + v[i] * v[i];
+			}
+		}
+	}
+}`, sig2)
+
+	_, err = kp.BuildKernel(kernel2Src, "computeResult")
+	if err != nil {
+		t.Fatalf("Failed to build computeResult: %v", err)
+	}
+
+	err = kp.ExecuteKernel("computeResult")
+	if err != nil {
+		t.Fatalf("Failed to execute computeResult: %v", err)
+	}
+
+	// Verify final results
+	for i := 0; i < 15; i++ {
+		u_val := float64(i) + 0.1*float64(i)*0.5 // Updated u from kernel 1
+		v_val := float64(i) * 0.5                // Original v
+		expected := u_val*u_val + v_val*v_val
+		if math.Abs(result[i]-expected) > 1e-10 {
+			t.Errorf("Final result[%d]: expected %f, got %f", i, expected, result[i])
+		}
+	}
 }

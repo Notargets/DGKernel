@@ -7,7 +7,6 @@ import (
 	"gonum.org/v1/gonum/mat"
 	"math"
 	"testing"
-	"unsafe"
 )
 
 // ============================================================================
@@ -28,15 +27,30 @@ func TestRunner_CopySemantics(t *testing.T) {
 			hostData[i] = float64(i)
 		}
 
-		err := kp.DefineKernel("copyto_test",
-			builder.Input("data").Bind(hostData).CopyTo(), // Only copies to device
+		// Phase 1: Define bindings
+		err := kp.DefineBindings(
+			builder.Input("data").Bind(hostData),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
+		}
+
+		// Phase 1: Allocate device memory
+		err = kp.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Phase 2: Configure kernel with CopyTo only
+		_, err = kp.ConfigureKernel("copyto_test",
+			kp.Param("data").CopyTo(), // Only copies to device
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
 		}
 
 		// Run kernel that modifies data
-		signature, _ := kp.GetKernelSignature("copyto_test")
+		signature, _ := kp.GetKernelSignatureForConfig("copyto_test")
 		kernelSource := fmt.Sprintf(`
 @kernel void copyto_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -52,7 +66,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 }`, signature)
 
 		kp.BuildKernel(kernelSource, "copyto_test")
-		kp.RunKernel("copyto_test")
+		kp.ExecuteKernel("copyto_test")
 
 		// Host data should be unchanged
 		for i := range hostData {
@@ -69,14 +83,29 @@ func TestRunner_CopySemantics(t *testing.T) {
 			hostData[i] = float64(i)
 		}
 
-		err := kp.DefineKernel("copy_test",
-			builder.InOut("data").Bind(hostData).Copy(), // Copies both ways
+		// Phase 1: Define bindings
+		err := kp.DefineBindings(
+			builder.InOut("data").Bind(hostData),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
 		}
 
-		signature, _ := kp.GetKernelSignature("copy_test")
+		// Phase 1: Allocate device memory
+		err = kp.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Phase 2: Configure kernel with bidirectional copy
+		_, err = kp.ConfigureKernel("copy_test",
+			kp.Param("data").Copy(), // Copies both ways
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		signature, _ := kp.GetKernelSignatureForConfig("copy_test")
 		kernelSource := fmt.Sprintf(`
 @kernel void copy_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -90,7 +119,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 }`, signature)
 
 		kp.BuildKernel(kernelSource, "copy_test")
-		kp.RunKernel("copy_test")
+		kp.ExecuteKernel("copy_test")
 
 		// Host data should be automatically updated
 		for i := range hostData {
@@ -109,14 +138,29 @@ func TestRunner_CopySemantics(t *testing.T) {
 		}
 		hostM := mat.NewDense(len(hostData), 1, hostData)
 
-		err := kp.DefineKernel("copy_test",
-			builder.InOut("data").Bind(hostM).Copy(), // Copies both ways
+		// Phase 1: Define bindings
+		err := kp.DefineBindings(
+			builder.InOut("data").Bind(hostM),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
 		}
 
-		signature, _ := kp.GetKernelSignature("copy_test")
+		// Phase 1: Allocate device memory
+		err = kp.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Phase 2: Configure kernel
+		_, err = kp.ConfigureKernel("copy_test",
+			kp.Param("data").Copy(), // Copies both ways
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		signature, _ := kp.GetKernelSignatureForConfig("copy_test")
 		kernelSource := fmt.Sprintf(`
 @kernel void copy_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -130,7 +174,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 }`, signature)
 
 		kp.BuildKernel(kernelSource, "copy_test")
-		kp.RunKernel("copy_test")
+		kp.ExecuteKernel("copy_test")
 
 		// Host data should be automatically updated
 		for i, val := range hostM.RawMatrix().Data {
@@ -150,15 +194,31 @@ func TestRunner_CopySemantics(t *testing.T) {
 		hostM := mat.NewDense(len(hostData), 1, hostData)
 		returnM := mat.NewDense(len(hostData), 1, nil)
 
-		err := kp.DefineKernel("copy_test",
-			builder.Input("data").Bind(hostM).CopyTo(),
-			builder.Output("ret").Bind(returnM).CopyBack(),
+		// Phase 1: Define bindings
+		err := kp.DefineBindings(
+			builder.Input("data").Bind(hostM),
+			builder.Output("ret").Bind(returnM),
 		)
 		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
+			t.Fatalf("Failed to define bindings: %v", err)
 		}
 
-		signature, _ := kp.GetKernelSignature("copy_test")
+		// Phase 1: Allocate device memory
+		err = kp.AllocateDevice()
+		if err != nil {
+			t.Fatalf("Failed to allocate device: %v", err)
+		}
+
+		// Phase 2: Configure kernel
+		_, err = kp.ConfigureKernel("copy_test",
+			kp.Param("data").CopyTo(),
+			kp.Param("ret").CopyBack(),
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		signature, _ := kp.GetKernelSignatureForConfig("copy_test")
 		kernelSource := fmt.Sprintf(`
 @kernel void copy_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -173,7 +233,7 @@ func TestRunner_CopySemantics(t *testing.T) {
 }`, signature)
 
 		kp.BuildKernel(kernelSource, "copy_test")
-		kp.RunKernel("copy_test")
+		kp.ExecuteKernel("copy_test")
 
 		// Host data should be automatically updated
 		for i, val := range returnM.RawMatrix().Data {
@@ -184,195 +244,58 @@ func TestRunner_CopySemantics(t *testing.T) {
 			}
 		}
 	})
-
-	t.Run("NoCopy", func(t *testing.T) {
-		hostData := make([]float64, 10)
-
-		err := kp.DefineKernel("nocopy_test",
-			builder.Output("data").Bind(hostData).NoCopy(),
-		)
-		if err != nil {
-			t.Fatalf("Failed to define kernel: %v", err)
-		}
-
-		// Write to device
-		signature, _ := kp.GetKernelSignature("nocopy_test")
-		kernelSource := fmt.Sprintf(`
-@kernel void nocopy_test(%s) {
-	for (int part = 0; part < NPART; ++part; @outer) {
-		double* data = data_PART(part);
-		for (int i = 0; i < KpartMax; ++i; @inner) {
-			if (i < K[part]) {
-				//data[i] = (double)(i * i);
-				data[i] = i * i;
-			}
-		}
-	}
-}`, signature)
-
-		kp.BuildKernel(kernelSource, "nocopy_test")
-		kp.RunKernel("nocopy_test")
-
-		// Host should still be zeros
-		for i := range hostData {
-			if hostData[i] != 0 {
-				t.Errorf("NoCopy failed - host modified at %d", i)
-			}
-		}
-
-		// But device should have data - verify with explicit copy
-		result, err := CopyArrayToHost[float64](kp, "data")
-		if err != nil {
-			t.Fatalf("Failed to copy: %v", err)
-		}
-
-		for i := 0; i < 10; i++ {
-			if result[i] != float64(i*i) {
-				t.Errorf("Device data wrong at %d: expected %f, got %f",
-					i, float64(i*i), result[i])
-			}
-		}
-	})
 }
 
-func TestDebugMatrixCopy(t *testing.T) {
-	device := utils.CreateTestDevice(true) // Force CUDA
-	defer device.Free()
-
-	kp := NewRunner(device, builder.Config{K: []int{10}})
-	defer kp.Free()
-
-	// Create test data
-	hostData := make([]float64, 10)
-	for i := range hostData {
-		hostData[i] = float64(i)
-	}
-
-	// Create matrix from the slice
-	hostM := mat.NewDense(len(hostData), 1, hostData)
-
-	t.Logf("Initial hostData: %v", hostData)
-	t.Logf("Initial matrix data: %v", hostM.RawMatrix().Data)
-
-	// Define kernel
-	err := kp.DefineKernel("test",
-		builder.InOut("data").Bind(hostM).Copy(),
-	)
-	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
-	}
-
-	// Check what was allocated
-	t.Logf("Allocated arrays: %v", kp.GetAllocatedArrays())
-
-	// Check the binding
-	binding := kp.GetBinding("data")
-	if binding != nil {
-		t.Logf("Binding info:")
-		t.Logf("  Name: %s", binding.Name)
-		t.Logf("  IsMatrix: %v", binding.IsMatrix)
-		t.Logf("  Size: %d", binding.Size)
-		t.Logf("  HostType: %v", binding.HostType)
-		t.Logf("  DeviceType: %v", binding.DeviceType)
-	}
-
-	// Check memory allocation
-	mem := kp.GetMemory("data")
-	if mem == nil {
-		// Try without _global suffix if it's a matrix
-		if memDirect := kp.PooledMemory["data"]; memDirect != nil {
-			t.Log("Memory found at 'data' (matrix allocation)")
-			mem = memDirect
-		} else {
-			t.Fatal("No memory allocated for 'data'")
-		}
-	} else {
-		t.Log("Memory found at 'data_global' (array allocation)")
-	}
-
-	// Manually copy initial data to device to verify
-	testData := make([]float64, 10)
-	mem.CopyTo(unsafe.Pointer(&testData[0]), int64(10*8))
-	t.Logf("Device data after allocation: %v", testData)
-
-	// Build and run kernel
-	signature, _ := kp.GetKernelSignature("test")
-	t.Logf("Kernel signature:\n%s", signature)
-
-	kernelSource := fmt.Sprintf(`
-@kernel void test(%s) {
-	for (int part = 0; part < NPART; ++part; @outer) {
-		double* data = data_PART(part);
-		for (int i = 0; i < KpartMax; ++i; @inner) {
-			if (i < K[part]) {
-				data[i] = data[i] * 2.0;
-			}
-		}
-	}
-}`, signature)
-
-	_, err = kp.BuildKernel(kernelSource, "test")
-	if err != nil {
-		t.Fatalf("Failed to build kernel: %v", err)
-	}
-
-	// Run kernel
-	err = kp.RunKernel("test")
-	if err != nil {
-		t.Fatalf("Failed to run kernel: %v", err)
-	}
-
-	// Check device data after kernel
-	mem.CopyTo(unsafe.Pointer(&testData[0]), int64(10*8))
-	t.Logf("Device data after kernel: %v", testData)
-
-	// Check host data
-	t.Logf("Host data after kernel: %v", hostData)
-	t.Logf("Matrix data after kernel: %v", hostM.RawMatrix().Data)
-
-	// Check if the matrix and slice still share memory
-	hostData[0] = 999.0
-	if hostM.At(0, 0) == 999.0 {
-		t.Log("Matrix and slice still share underlying data")
-	} else {
-		t.Log("Matrix and slice NO LONGER share underlying data")
-	}
-}
+// ============================================================================
+// Partition-wise copy tests
+// ============================================================================
 
 func TestRunner_PartitionCopy(t *testing.T) {
 	device := utils.CreateTestDevice()
-	// device := utils.CreateTestDevice(true)
 	defer device.Free()
 
-	k := []int{3, 5, 7}
-	kp := NewRunner(device, builder.Config{
-		K: k,
-	})
+	k := []int{5, 10, 8}
+	kp := NewRunner(device, builder.Config{K: k})
 	defer kp.Free()
 
-	hostData := [][]float64{
-		make([]float64, k[0]),
-		make([]float64, k[1]),
-		make([]float64, k[2]),
+	// Create test data
+	totalSize := 0
+	for _, kval := range k {
+		totalSize += kval
 	}
 
-	// Initialize with partition-specific patterns
+	hostData := make([]float64, totalSize)
 	idx := 0
-	for part, partK := range k {
-		for elem := 0; elem < partK; elem++ {
-			hostData[part][elem] = float64(part*100 + elem)
+	for part, kval := range k {
+		for elem := 0; elem < kval; elem++ {
+			hostData[idx] = float64(part*100 + elem)
 			idx++
 		}
 	}
 
-	err := kp.DefineKernel("partition_test",
-		builder.InOut("data").Bind(hostData).Copy(),
+	// Phase 1: Define bindings
+	err := kp.DefineBindings(
+		builder.InOut("data").Bind(hostData),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	signature, _ := kp.GetKernelSignature("partition_test")
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 2: Configure kernel
+	_, err = kp.ConfigureKernel("partition_test",
+		kp.Param("data").Copy(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
+	}
+
+	signature, _ := kp.GetKernelSignatureForConfig("partition_test")
 	kernelSource := fmt.Sprintf(`
 @kernel void partition_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -386,7 +309,7 @@ func TestRunner_PartitionCopy(t *testing.T) {
 }`, signature)
 
 	kp.BuildKernel(kernelSource, "partition_test")
-	kp.RunKernel("partition_test")
+	kp.ExecuteKernel("partition_test")
 
 	// Test partition-wise copy
 	for partID, partK := range k {
@@ -429,15 +352,31 @@ func TestRunner_TypeConversion(t *testing.T) {
 		hostData64[i] = float64(i) * 1.123456789
 	}
 
-	err := kp.DefineKernel("convert_test",
-		builder.Input("input").Bind(hostData64).CopyTo().Convert(builder.Float32),
+	// Phase 1: Define bindings with conversion
+	err := kp.DefineBindings(
+		builder.Input("input").Bind(hostData64).Convert(builder.Float32),
 		builder.Output("output").Bind(hostResult32), // No conversion needed
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	signature, _ := kp.GetKernelSignature("convert_test")
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Phase 2: Configure kernel
+	_, err = kp.ConfigureKernel("convert_test",
+		kp.Param("input").CopyTo(),
+		kp.Param("output").CopyBack(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
+	}
+
+	signature, _ := kp.GetKernelSignatureForConfig("convert_test")
 	kernelSource := fmt.Sprintf(`
 @kernel void convert_test(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
@@ -453,91 +392,294 @@ func TestRunner_TypeConversion(t *testing.T) {
 }`, signature)
 
 	kp.BuildKernel(kernelSource, "convert_test")
-	kp.RunKernel("convert_test")
+	kp.ExecuteKernel("convert_test")
 
-	// Get result
-	result, err := CopyArrayToHost[float32](kp, "output")
-	if err != nil {
-		t.Fatalf("Failed to copy result: %v", err)
-	}
-
-	// Verify with appropriate float32 precision
-	for i := 0; i < 100; i++ {
-		expected := float32(hostData64[i] * 2.0)
-		if abs32(result[i]-expected) > 1e-6 {
-			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
+	// Verify values were converted and computed correctly
+	for i := range hostResult32 {
+		expected := float32(hostData64[i]) * 2.0
+		if math.Abs(float64(hostResult32[i]-expected)) > 1e-6 {
+			t.Errorf("Element %d: expected %f, got %f",
+				i, expected, hostResult32[i])
 		}
 	}
 }
 
-func TestRunner_WorkingArrays(t *testing.T) {
+// TestRunner_ManualMemoryOperations tests manual memory copy operations
+func TestRunner_ManualMemoryOperations(t *testing.T) {
 	device := utils.CreateTestDevice()
 	defer device.Free()
 
-	kp := NewRunner(device, builder.Config{K: []int{50}})
+	kp := NewRunner(device, builder.Config{
+		K: []int{10},
+	})
 	defer kp.Free()
 
-	hostInput := make([]float64, 50)
-	hostOutput := make([]float64, 50)
-
-	for i := range hostInput {
-		hostInput[i] = float64(i)
+	// Host data
+	data := make([]float64, 10)
+	for i := range data {
+		data[i] = float64(i)
 	}
 
-	// Define kernel with working arrays
-	err := kp.DefineKernel("working_test",
-		builder.Input("input").Bind(hostInput).CopyTo(),
-		builder.Output("output").Bind(hostOutput),
-		builder.Temp("scratch1").Type(builder.Float64).Size(50),
-		builder.Temp("scratch2").Type(builder.Float64).Size(50),
+	// Phase 1: Define bindings
+	err := kp.DefineBindings(
+		builder.InOut("data").Bind(data),
 	)
 	if err != nil {
-		t.Fatalf("Failed to define kernel: %v", err)
+		t.Fatalf("Failed to define bindings: %v", err)
 	}
 
-	signature, _ := kp.GetKernelSignature("working_test")
-	kernelSource := fmt.Sprintf(`
-@kernel void working_test(%s) {
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	t.Run("ManualCopyToDevice", func(t *testing.T) {
+		// Manually copy to device
+		err := kp.CopyToDevice("data")
+		if err != nil {
+			t.Fatalf("CopyToDevice failed: %v", err)
+		}
+
+		// Run kernel without any copy actions
+		_, err = kp.ConfigureKernel("process",
+			kp.Param("data"), // No copy actions
+		)
+		if err != nil {
+			t.Fatalf("Failed to configure kernel: %v", err)
+		}
+
+		signature, _ := kp.GetKernelSignatureForConfig("process")
+		kernelSource := fmt.Sprintf(`
+@kernel void process(%s) {
 	for (int part = 0; part < NPART; ++part; @outer) {
-		const double* input = input_PART(part);
-		double* output = output_PART(part);
-		double* scratch1 = scratch1_PART(part);
-		double* scratch2 = scratch2_PART(part);
-		
+		double* data = data_PART(part);
 		for (int i = 0; i < KpartMax; ++i; @inner) {
 			if (i < K[part]) {
-				// Multi-stage computation using scratch arrays
-				scratch1[i] = input[i] * 2.0;
-				scratch2[i] = scratch1[i] + 10.0;
-				output[i] = scratch2[i] * scratch1[i];
+				data[i] *= 3.0;
 			}
 		}
 	}
 }`, signature)
 
-	kp.BuildKernel(kernelSource, "working_test")
-	kp.RunKernel("working_test")
+		kp.BuildKernel(kernelSource, "process")
+		kp.ExecuteKernel("process")
 
-	result, err := CopyArrayToHost[float64](kp, "output")
-	if err != nil {
-		t.Fatalf("Failed to copy result: %v", err)
+		// Manually copy back
+		err = kp.CopyFromDevice("data")
+		if err != nil {
+			t.Fatalf("CopyFromDevice failed: %v", err)
+		}
+
+		// Verify
+		for i := range data {
+			expected := float64(i) * 3.0
+			if math.Abs(data[i]-expected) > 1e-10 {
+				t.Errorf("Element %d: expected %f, got %f", i, expected, data[i])
+			}
+		}
+	})
+}
+
+// TestRunner_ConfigureCopy tests batch copy configuration
+func TestRunner_ConfigureCopy(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	kp := NewRunner(device, builder.Config{
+		K: []int{10},
+	})
+	defer kp.Free()
+
+	// Host data
+	a := make([]float64, 10)
+	b := make([]float64, 10)
+	c := make([]float64, 10)
+
+	for i := range a {
+		a[i] = float64(i)
+		b[i] = float64(i * 2)
 	}
 
-	// Verify: output = (input*2 + 10) * (input*2)
-	for i := 0; i < 50; i++ {
-		scratch1 := hostInput[i] * 2.0
-		scratch2 := scratch1 + 10.0
-		expected := scratch2 * scratch1
-		if math.Abs(result[i]-expected) > 1e-10 {
-			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
+	// Phase 1: Define bindings
+	err := kp.DefineBindings(
+		builder.Input("a").Bind(a),
+		builder.Input("b").Bind(b),
+		builder.Output("c").Bind(c),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Configure batch copy to device
+	copyToConfig, err := kp.ConfigureCopy(
+		kp.Param("a").CopyTo(),
+		kp.Param("b").CopyTo(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure copy to device: %v", err)
+	}
+
+	// Execute batch copy
+	err = kp.ExecuteCopy(copyToConfig)
+	if err != nil {
+		t.Fatalf("Failed to execute copy to device: %v", err)
+	}
+
+	// Run kernel without copy actions
+	_, err = kp.ConfigureKernel("add",
+		kp.Param("a"),
+		kp.Param("b"),
+		kp.Param("c"),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure kernel: %v", err)
+	}
+
+	signature, _ := kp.GetKernelSignatureForConfig("add")
+	kernelSource := fmt.Sprintf(`
+@kernel void add(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		const double* a = a_PART(part);
+		const double* b = b_PART(part);
+		double* c = c_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				c[i] = a[i] + b[i];
+			}
+		}
+	}
+}`, signature)
+
+	kp.BuildKernel(kernelSource, "add")
+	kp.ExecuteKernel("add")
+
+	// Configure batch copy from device
+	copyFromConfig, err := kp.ConfigureCopy(
+		kp.Param("c").CopyBack(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure copy from device: %v", err)
+	}
+
+	// Execute batch copy
+	err = kp.ExecuteCopy(copyFromConfig)
+	if err != nil {
+		t.Fatalf("Failed to execute copy from device: %v", err)
+	}
+
+	// Verify results
+	for i := range c {
+		expected := a[i] + b[i]
+		if math.Abs(c[i]-expected) > 1e-10 {
+			t.Errorf("Element %d: expected %f, got %f", i, expected, c[i])
 		}
 	}
 }
 
-// Helper functions
-func abs32(x float32) float32 {
-	if x < 0 {
-		return -x
+// TestRunner_DeviceDataPersistence tests that device data persists between kernels
+func TestRunner_DeviceDataPersistence(t *testing.T) {
+	device := utils.CreateTestDevice()
+	defer device.Free()
+
+	kp := NewRunner(device, builder.Config{
+		K: []int{10},
+	})
+	defer kp.Free()
+
+	// Host data
+	data := make([]float64, 10)
+	intermediate := make([]float64, 10)
+	result := make([]float64, 10)
+
+	for i := range data {
+		data[i] = float64(i)
 	}
-	return x
+
+	// Phase 1: Define bindings
+	err := kp.DefineBindings(
+		builder.InOut("data").Bind(data),
+		builder.InOut("intermediate").Bind(intermediate),
+		builder.Output("result").Bind(result),
+	)
+	if err != nil {
+		t.Fatalf("Failed to define bindings: %v", err)
+	}
+
+	// Phase 1: Allocate device memory
+	err = kp.AllocateDevice()
+	if err != nil {
+		t.Fatalf("Failed to allocate device: %v", err)
+	}
+
+	// Kernel 1: Square the data and store in intermediate
+	_, err = kp.ConfigureKernel("square",
+		kp.Param("data").CopyTo(),
+		kp.Param("intermediate"), // No copy - stays on device
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure square kernel: %v", err)
+	}
+
+	sig1, _ := kp.GetKernelSignatureForConfig("square")
+	kernel1Src := fmt.Sprintf(`
+@kernel void square(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		const double* data = data_PART(part);
+		double* intermediate = intermediate_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				intermediate[i] = data[i] * data[i];
+			}
+		}
+	}
+}`, sig1)
+
+	kp.BuildKernel(kernel1Src, "square")
+	kp.ExecuteKernel("square")
+
+	// Kernel 2: Add original data to squared data
+	_, err = kp.ConfigureKernel("combine",
+		kp.Param("data"),         // Still on device from kernel 1
+		kp.Param("intermediate"), // Still on device from kernel 1
+		kp.Param("result").CopyBack(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to configure combine kernel: %v", err)
+	}
+
+	sig2, _ := kp.GetKernelSignatureForConfig("combine")
+	kernel2Src := fmt.Sprintf(`
+@kernel void combine(%s) {
+	for (int part = 0; part < NPART; ++part; @outer) {
+		const double* data = data_PART(part);
+		const double* intermediate = intermediate_PART(part);
+		double* result = result_PART(part);
+		
+		for (int i = 0; i < KpartMax; ++i; @inner) {
+			if (i < K[part]) {
+				result[i] = data[i] + intermediate[i]; // i + i^2
+			}
+		}
+	}
+}`, sig2)
+
+	kp.BuildKernel(kernel2Src, "combine")
+	kp.ExecuteKernel("combine")
+
+	// Verify results: result[i] = i + i^2
+	for i := range result {
+		expected := float64(i) + float64(i*i)
+		if math.Abs(result[i]-expected) > 1e-10 {
+			t.Errorf("Element %d: expected %f, got %f", i, expected, result[i])
+		}
+	}
 }
