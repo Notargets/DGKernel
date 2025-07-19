@@ -166,7 +166,7 @@ func (m *Mesh) AddNodeWithParametric(nodeID int, coords []float64, paramCoords [
 
 // AddElement adds an element with the given ID, type, and connectivity
 func (m *Mesh) AddElement(elemID int, elemType utils.GeometryType, tags []int, nodeIDs []int) error {
-	// Convert node IDs to array indices
+	// DeviceMemType node IDs to array indices
 	nodes := make([]int, len(nodeIDs))
 	for i, nid := range nodeIDs {
 		// Skip zero node IDs (padding)
@@ -429,7 +429,7 @@ func ConvertToMesh(cm utils.CompleteMesh) *Mesh {
 	elemID := 1
 	for _, elemSet := range cm.Elements {
 		for i, elemNodes := range elemSet.Elements {
-			// Convert logical names to node IDs
+			// DeviceMemType logical names to node IDs
 			nodeIDs := make([]int, len(elemNodes))
 			for j, nodeName := range elemNodes {
 				nodeIDs[j] = cm.Nodes.NodeIDMap[nodeName]

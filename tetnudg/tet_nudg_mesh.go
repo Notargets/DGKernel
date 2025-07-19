@@ -244,7 +244,7 @@ func (dg *TetNudgMesh) GetProperties() element.ElementProperties {
 }
 
 func (dg *TetNudgMesh) GetReferenceGeometry() element.ReferenceGeometry {
-	// Convert vectors to slices
+	// DeviceMemType vectors to slices
 	r := make([]float64, dg.Np)
 	s := make([]float64, dg.Np)
 	tt := make([]float64, dg.Np)

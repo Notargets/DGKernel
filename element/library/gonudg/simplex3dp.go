@@ -59,7 +59,7 @@ func GradSimplex3DP(r, s, t []float64, id, jd, kd int) (dmodedr, dmodeds, dmoded
 	dmodeds = make([]float64, n)
 	dmodedt = make([]float64, n)
 
-	// Convert to collapsed coordinates
+	// DeviceMemType to collapsed coordinates
 	a, b, c := RSTtoABC(r, s, t)
 
 	// Compute Jacobi polynomials and their derivatives

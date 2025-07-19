@@ -362,7 +362,7 @@ func TestRunner_TypeConversion(t *testing.T) {
 
 	// Phase 1: Define bindings with conversion
 	err := kp.DefineBindings(
-		builder.Input("input").Bind(hostData64).Convert(builder.Float32),
+		builder.Input("input").Bind(hostData64).DeviceMemType(builder.Float32),
 		builder.Output("output").Bind(hostResult32), // No conversion needed
 	)
 	if err != nil {

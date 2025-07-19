@@ -132,7 +132,7 @@ func TestDefineBindings_TypeConversion(t *testing.T) {
 
 	// Define binding with type conversion
 	err := runner.DefineBindings(
-		builder.Input("data").Bind(hostData).Convert(builder.Float32),
+		builder.Input("data").Bind(hostData).DeviceMemType(builder.Float32),
 	)
 	if err != nil {
 		t.Fatalf("DefineBindings failed: %v", err)

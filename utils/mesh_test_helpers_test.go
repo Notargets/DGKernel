@@ -176,7 +176,7 @@ func TestCubeMeshMathematicalCorrectness(t *testing.T) {
 
 		// Process each tetrahedron
 		for tetIdx, tet := range tets {
-			// Convert node names to indices
+			// DeviceMemType node names to indices
 			tetIndices := make([]int, 4)
 			for i, nodeName := range tet {
 				tetIndices[i] = nodeToID[nodeName]

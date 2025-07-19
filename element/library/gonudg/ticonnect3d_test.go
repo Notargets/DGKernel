@@ -14,7 +14,7 @@ func meshToEToV(mesh utils.CompleteMesh) [][]int {
 	for _, elemSet := range mesh.Elements {
 		if elemSet.Type == utils.Tet {
 			for _, elem := range elemSet.Elements {
-				// Convert logical node names to indices
+				// DeviceMemType logical node names to indices
 				tetConn := make([]int, 4)
 				for i, nodeName := range elem {
 					tetConn[i] = mesh.Nodes.NodeMap[nodeName]

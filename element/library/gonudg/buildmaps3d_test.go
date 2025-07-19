@@ -31,7 +31,7 @@ func meshToDG3DFormat(m utils.CompleteMesh) (VX, VY, VZ []float64, EToV [][]int)
 			for i, elem := range elemSet.Elements {
 				EToV[i] = make([]int, 4)
 				for j, nodeName := range elem {
-					// Convert node name to index (0-based)
+					// DeviceMemType node name to index (0-based)
 					EToV[i][j] = m.Nodes.NodeMap[nodeName]
 				}
 			}

@@ -138,8 +138,8 @@ func (p *ParamBuilder) NoCopy() *ParamBuilder {
 	return p
 }
 
-// Convert sets type conversion during copy operations
-func (p *ParamBuilder) Convert(toType DataType) *ParamBuilder {
+// DeviceMemType sets type conversion during copy operations
+func (p *ParamBuilder) DeviceMemType(toType DataType) *ParamBuilder {
 	p.Spec.ConvertType = toType
 	return p
 }

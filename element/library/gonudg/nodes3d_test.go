@@ -287,7 +287,7 @@ func TestCombinedFixes(t *testing.T) {
 		X, Y, Z := Nodes3D(1)
 		r, s, tt := XYZtoRST(X, Y, Z)
 
-		// Convert to (a,b,c) for basis evaluation
+		// DeviceMemType to (a,b,c) for basis evaluation
 		a, b, c := RSTtoABC(r, s, tt)
 
 		// Build 4x4 Vandermonde matrix

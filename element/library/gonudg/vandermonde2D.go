@@ -32,7 +32,7 @@ func Vandermonde2D(N int, R, S []float64) *mat.Dense {
 // S) of order (i,j)
 // This version works with []float64 instead of utils.Vector
 func Simplex2DP(R, S []float64, i, j int) []float64 {
-	// Convert R,S to (a,b) coordinates
+	// DeviceMemType R,S to (a,b) coordinates
 	a, b := RStoAB(R, S)
 
 	Np := len(R)

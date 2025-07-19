@@ -1,4 +1,4 @@
-// Test file to verify .Convert() functionality
+// Test file to verify .DeviceMemType() functionality
 package runner
 
 import (
@@ -28,8 +28,8 @@ func TestConvert_BasicFloat64ToFloat32(t *testing.T) {
 
 	// Phase 1: Define bindings with conversion
 	err := kp.DefineBindings(
-		builder.Input("input").Bind(hostInput).Convert(builder.Float32),
-		builder.Output("output").Bind(hostOutput).Convert(builder.Float32),
+		builder.Input("input").Bind(hostInput).DeviceMemType(builder.Float32),
+		builder.Output("output").Bind(hostOutput).DeviceMemType(builder.Float32),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define bindings: %v", err)
@@ -86,7 +86,7 @@ func TestConvert_BasicFloat64ToFloat32(t *testing.T) {
 	// Verify results - should have precision loss from float64->float32->float64
 	for i := range hostOutput {
 		expected := hostInput[i] * 2.0
-		// Convert to float32 and back to simulate precision loss
+		// DeviceMemType to float32 and back to simulate precision loss
 		expectedWithLoss := float64(float32(expected))
 
 		if math.Abs(hostOutput[i]-expectedWithLoss) > 1e-6 {
@@ -129,8 +129,8 @@ func TestConvert_PartitionedData(t *testing.T) {
 
 	// Phase 1: Define bindings with conversion for partitioned data
 	err := kp.DefineBindings(
-		builder.Input("input").Bind(hostInput).Convert(builder.Float64),    // Convert to float64 on device
-		builder.Output("output").Bind(hostOutput).Convert(builder.Float64), // Device will be float64
+		builder.Input("input").Bind(hostInput).DeviceMemType(builder.Float64),    // DeviceMemType to float64 on device
+		builder.Output("output").Bind(hostOutput).DeviceMemType(builder.Float64), // Device will be float64
 	)
 	if err != nil {
 		t.Fatalf("Failed to define bindings: %v", err)
@@ -247,7 +247,7 @@ func TestConvert_AllCombinations(t *testing.T) {
 
 			// Phase 1: Define bindings
 			err := kp.DefineBindings(
-				builder.InOut("data").Bind(hostData).Convert(tc.convertTo),
+				builder.InOut("data").Bind(hostData).DeviceMemType(tc.convertTo),
 			)
 			if err != nil {
 				t.Fatalf("Failed to define bindings: %v", err)
@@ -298,9 +298,9 @@ func TestConvert_MixedPrecisionKernel(t *testing.T) {
 
 	// Phase 1: Define bindings with different types
 	err := kp.DefineBindings(
-		builder.Input("input").Bind(input64),                              // Keep as float64
-		builder.Input("weights").Bind(weights32).Convert(builder.Float64), // Convert to float64
-		builder.Output("output").Bind(output64),                           // Keep as float64
+		builder.Input("input").Bind(input64),                                    // Keep as float64
+		builder.Input("weights").Bind(weights32).DeviceMemType(builder.Float64), // DeviceMemType to float64
+		builder.Output("output").Bind(output64),                                 // Keep as float64
 	)
 	if err != nil {
 		t.Fatalf("Failed to define bindings: %v", err)
@@ -373,7 +373,7 @@ func TestConvert_VerifyMemoryAllocation(t *testing.T) {
 
 	// Phase 1: Define bindings with conversion
 	err := kp.DefineBindings(
-		builder.Input("data_f32").Bind(hostData).Convert(builder.Float32),
+		builder.Input("data_f32").Bind(hostData).DeviceMemType(builder.Float32),
 		builder.Input("data_f64").Bind(hostData), // No conversion
 	)
 	if err != nil {
@@ -431,7 +431,7 @@ func TestConvert_RoundTripAccuracy(t *testing.T) {
 
 	// Phase 1: Define bindings
 	err := kp.DefineBindings(
-		builder.InOut("data").Bind(hostInput).Convert(builder.Float32),
+		builder.InOut("data").Bind(hostInput).DeviceMemType(builder.Float32),
 		builder.Output("output").Bind(hostOutput),
 	)
 	if err != nil {

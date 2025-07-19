@@ -611,7 +611,7 @@ func (b *SU2TestBuilder) BuildFromCompleteMesh(mesh *utils.CompleteMesh) string 
 		su2Type := elementTypeToSU2(elemSet.Type)
 		for _, elem := range elemSet.Elements {
 			line := fmt.Sprintf("%d", su2Type)
-			// Convert logical node names to indices
+			// DeviceMemType logical node names to indices
 			for _, nodeName := range elem {
 				nodeIdx := mesh.Nodes.NodeMap[nodeName]
 				line += fmt.Sprintf(" %d", nodeIdx)

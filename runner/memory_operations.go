@@ -249,7 +249,7 @@ func (kr *Runner) copyWithTypeConversion(hostData interface{}, mem *gocca.OCCAMe
 		data := hostData.([]float64)
 		switch deviceType {
 		case builder.Float32:
-			// Convert float64 to float32
+			// DeviceMemType float64 to float32
 			converted := make([]float32, len(data))
 			for i, v := range data {
 				converted[i] = float32(v)
@@ -266,7 +266,7 @@ func (kr *Runner) copyWithTypeConversion(hostData interface{}, mem *gocca.OCCAMe
 		data := hostData.([]float32)
 		switch deviceType {
 		case builder.Float64:
-			// Convert float32 to float64
+			// DeviceMemType float32 to float64
 			converted := make([]float64, len(data))
 			for i, v := range data {
 				converted[i] = float64(v)
@@ -283,7 +283,7 @@ func (kr *Runner) copyWithTypeConversion(hostData interface{}, mem *gocca.OCCAMe
 		data := hostData.([]int32)
 		switch deviceType {
 		case builder.INT64:
-			// Convert int32 to int64
+			// DeviceMemType int32 to int64
 			converted := make([]int64, len(data))
 			for i, v := range data {
 				converted[i] = int64(v)
@@ -300,7 +300,7 @@ func (kr *Runner) copyWithTypeConversion(hostData interface{}, mem *gocca.OCCAMe
 		data := hostData.([]int64)
 		switch deviceType {
 		case builder.INT32:
-			// Convert int64 to int32 (with potential data loss)
+			// DeviceMemType int64 to int32 (with potential data loss)
 			converted := make([]int32, len(data))
 			for i, v := range data {
 				converted[i] = int32(v)
@@ -334,7 +334,7 @@ func (kr *Runner) copyFromDeviceWithTypeConversion(mem *gocca.OCCAMemory, hostDa
 
 		switch hostType {
 		case builder.Float64:
-			// Convert to float64
+			// DeviceMemType to float64
 			hostSlice := hostData.([]float64)
 			for i, v := range deviceData {
 				hostSlice[i] = float64(v)
@@ -355,7 +355,7 @@ func (kr *Runner) copyFromDeviceWithTypeConversion(mem *gocca.OCCAMemory, hostDa
 
 		switch hostType {
 		case builder.Float32:
-			// Convert to float32
+			// DeviceMemType to float32
 			hostSlice := hostData.([]float32)
 			for i, v := range deviceData {
 				hostSlice[i] = float32(v)
@@ -376,7 +376,7 @@ func (kr *Runner) copyFromDeviceWithTypeConversion(mem *gocca.OCCAMemory, hostDa
 
 		switch hostType {
 		case builder.INT64:
-			// Convert to int64
+			// DeviceMemType to int64
 			hostSlice := hostData.([]int64)
 			for i, v := range deviceData {
 				hostSlice[i] = int64(v)
@@ -397,7 +397,7 @@ func (kr *Runner) copyFromDeviceWithTypeConversion(mem *gocca.OCCAMemory, hostDa
 
 		switch hostType {
 		case builder.INT32:
-			// Convert to int32
+			// DeviceMemType to int32
 			hostSlice := hostData.([]int32)
 			for i, v := range deviceData {
 				hostSlice[i] = int32(v)

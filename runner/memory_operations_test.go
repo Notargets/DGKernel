@@ -217,7 +217,7 @@ func TestCopyWithTypeConversion(t *testing.T) {
 	}
 
 	runner.DefineBindings(
-		builder.Input("data").Bind(hostData).Convert(builder.Float32),
+		builder.Input("data").Bind(hostData).DeviceMemType(builder.Float32),
 	)
 	runner.AllocateDevice()
 

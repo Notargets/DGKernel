@@ -122,7 +122,7 @@ func ReadGambitNeutral(filename string) (*mesh.Mesh, error) {
 					for j := 3; j < len(fields) && len(nodes) < numNodes; j++ {
 						nodeID, err := strconv.Atoi(fields[j])
 						if err == nil {
-							// Convert node ID to 0-based index
+							// DeviceMemType node ID to 0-based index
 							if idx, ok := msh.NodeIDMap[nodeID]; ok {
 								nodes = append(nodes, idx)
 							}
@@ -208,7 +208,7 @@ func ReadGambitNeutral(filename string) (*mesh.Mesh, error) {
 				for _, field := range fields {
 					elemID, err := strconv.Atoi(field)
 					if err == nil && elemID > 0 {
-						// Convert to 0-based index
+						// DeviceMemType to 0-based index
 						if idx, ok := msh.ElementIDMap[elemID]; ok {
 							group.Elements = append(group.Elements, idx)
 
@@ -287,7 +287,7 @@ func ReadGambitNeutral(filename string) (*mesh.Mesh, error) {
 								return nil, fmt.Errorf("invalid boundary condition format")
 							}
 
-							// Convert element ID to 0-based index
+							// DeviceMemType element ID to 0-based index
 							if idx, ok := msh.ElementIDMap[elemID]; ok {
 								// Initialize BoundaryElements if needed
 								if msh.BoundaryElements == nil {
@@ -297,7 +297,7 @@ func ReadGambitNeutral(filename string) (*mesh.Mesh, error) {
 								// Create boundary element
 								be := mesh.BoundaryElement{
 									ParentElement: idx,
-									ParentFace:    faceID - 1, // Convert to 0-based
+									ParentFace:    faceID - 1, // DeviceMemType to 0-based
 								}
 
 								// Map element type to boundary element type

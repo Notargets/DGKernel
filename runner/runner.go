@@ -202,7 +202,7 @@ func (kr *Runner) allocateSingleArray(spec builder.ArraySpec, paramSpec *builder
 
 	var offsetMem *gocca.OCCAMemory
 	if intSize == 4 {
-		// Convert to int32
+		// DeviceMemType to int32
 		offsets32 := make([]int32, len(offsets))
 		for i, v := range offsets {
 			offsets32[i] = int32(v)
@@ -400,7 +400,7 @@ func (kr *Runner) AllocateDeviceMatrices() error {
 			}
 			mem = kr.Device.Malloc(int64(totalElements*8), unsafe.Pointer(&transposed[0]), nil)
 		} else {
-			// Convert to float32 and transpose
+			// DeviceMemType to float32 and transpose
 			transposed := make([]float32, totalElements)
 			for i := 0; i < rows; i++ {
 				for j := 0; j < cols; j++ {

@@ -132,7 +132,7 @@ func TestDmatrices3D(t *testing.T) {
 	}
 
 	// Compute derivatives using matrix multiplication
-	// Convert to gonum vector for multiplication
+	// DeviceMemType to gonum vector for multiplication
 	fVec := mat.NewVecDense(len(f), f)
 
 	dfdrVec := mat.NewVecDense(len(f), nil)

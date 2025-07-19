@@ -112,7 +112,7 @@ func (b *Gmsh22TestBuilder) buildElements(msh *utils.CompleteMesh) string {
 				tags = []int{0}
 			}
 
-			// Convert node names to IDs
+			// DeviceMemType node names to IDs
 			nodeIDs := make([]string, len(elem))
 			for j, nodeName := range elem {
 				nodeIDs[j] = fmt.Sprintf("%d", msh.Nodes.NodeIDMap[nodeName])

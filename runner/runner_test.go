@@ -667,7 +667,7 @@ func TestDGKernel_TypeConversion(t *testing.T) {
 
 	// Phase 1: Define bindings with conversion
 	err := kp.DefineBindings(
-		builder.InOut("data").Bind(hostData64).Convert(builder.Float32),
+		builder.InOut("data").Bind(hostData64).DeviceMemType(builder.Float32),
 	)
 	if err != nil {
 		t.Fatalf("Failed to define bindings: %v", err)

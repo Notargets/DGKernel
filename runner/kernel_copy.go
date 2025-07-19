@@ -31,7 +31,7 @@ func (kr *Runner) copyMatrixPartitionsFromDevice(data []mat.Matrix, deviceMem *g
 
 			// Type assert to mutable matrix
 			if m, ok := matrix.(*mat.Dense); ok {
-				// Convert float32 to float64 and unpack from column-major
+				// DeviceMemType float32 to float64 and unpack from column-major
 				for r := 0; r < rows; r++ {
 					for c := 0; c < cols; c++ {
 						val := float64(temp[c*rows+r])
@@ -97,7 +97,7 @@ func (kr *Runner) copyMatrixToDevice(matrix mat.Matrix, mem *gocca.OCCAMemory, d
 		}
 		mem.CopyFrom(unsafe.Pointer(&transposed[0]), int64(totalElements*8))
 	} else {
-		// Convert and transpose
+		// DeviceMemType and transpose
 		transposed := make([]float32, totalElements)
 		for i := 0; i < rows; i++ {
 			for j := 0; j < cols; j++ {
@@ -314,7 +314,7 @@ func (kr *Runner) copyFloat64PartitionsToDevice(data [][]float64, deviceMem *goc
 		var bytes int64
 
 		if needsConversion && targetType == builder.Float32 {
-			// Convert float64 to float32
+			// DeviceMemType float64 to float32
 			converted := make([]float32, len(partition))
 			for j, v := range partition {
 				converted[j] = float32(v)
@@ -347,7 +347,7 @@ func (kr *Runner) copyFloat32PartitionsToDevice(data [][]float32, deviceMem *goc
 		var bytes int64
 
 		if needsConversion && targetType == builder.Float64 {
-			// Convert float32 to float64
+			// DeviceMemType float32 to float64
 			converted := make([]float64, len(partition))
 			for j, v := range partition {
 				converted[j] = float64(v)
@@ -380,7 +380,7 @@ func (kr *Runner) copyInt64PartitionsToDevice(data [][]int64, deviceMem *gocca.O
 		var bytes int64
 
 		if needsConversion && targetType == builder.INT32 {
-			// Convert int64 to int32
+			// DeviceMemType int64 to int32
 			converted := make([]int32, len(partition))
 			for j, v := range partition {
 				converted[j] = int32(v)
@@ -413,7 +413,7 @@ func (kr *Runner) copyInt32PartitionsToDevice(data [][]int32, deviceMem *gocca.O
 		var bytes int64
 
 		if needsConversion && targetType == builder.INT64 {
-			// Convert int32 to int64
+			// DeviceMemType int32 to int64
 			converted := make([]int64, len(partition))
 			for j, v := range partition {
 				converted[j] = int64(v)
@@ -448,7 +448,7 @@ func (kr *Runner) copyMatrixPartitionsToDevice(data []mat.Matrix, deviceMem *goc
 		var bytes int64
 
 		if needsConversion && targetType == builder.Float32 {
-			// Convert float64 to float32
+			// DeviceMemType float64 to float32
 			converted := make([]float32, len(flatData))
 			for j, v := range flatData {
 				converted[j] = float32(v)
@@ -484,7 +484,7 @@ func (kr *Runner) copyFloat64PartitionsFromDevice(data [][]float64, deviceMem *g
 			offsetBytes := offsets[i] * 4 // FIX: Use sourceType size (4 bytes for float32)
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
 
-			// Convert to float64
+			// DeviceMemType to float64
 			for j, v := range temp {
 				partition[j] = float64(v)
 			}
@@ -515,7 +515,7 @@ func (kr *Runner) copyFloat32PartitionsFromDevice(data [][]float32, deviceMem *g
 			offsetBytes := offsets[i] * 8 // Device has float64, so 8 bytes per element
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
 
-			// Convert from float64 to float32
+			// DeviceMemType from float64 to float32
 			for j, v := range temp {
 				partition[j] = float32(v)
 			}
@@ -546,7 +546,7 @@ func (kr *Runner) copyInt64PartitionsFromDevice(data [][]int64, deviceMem *gocca
 			offsetBytes := offsets[i] * 4
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
 
-			// Convert to int64
+			// DeviceMemType to int64
 			for j, v := range temp {
 				partition[j] = int64(v)
 			}
@@ -577,7 +577,7 @@ func (kr *Runner) copyInt32PartitionsFromDevice(data [][]int32, deviceMem *gocca
 			offsetBytes := offsets[i] * 8 // Device has int64, so 8 bytes per element
 			deviceMem.CopyToWithOffset(unsafe.Pointer(&temp[0]), partitionBytes, offsetBytes)
 
-			// Convert from int64 to int32 (with potential data loss)
+			// DeviceMemType from int64 to int32 (with potential data loss)
 			for j, v := range temp {
 				partition[j] = int32(v)
 			}
