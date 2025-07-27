@@ -313,23 +313,15 @@ func (s *Burgers3DSolver) buildKernels(props element.ElementProperties) error {
 		const double* Ty = Ty_PART(part);
 		const double* Tz = Tz_PART(part);
 		
+		// Step 1: Compute reference space derivatives using matrix operations
+		// ur = Dr * u, us = Ds * u, ut = Dt * u
+        MATMUL_Dr_%s(u, ur, K[part]);
+        MATMUL_Ds_%s(u, us, K[part]);
+        MATMUL_Dt_%s(u, ut, K[part]);
+
 		for (int elem = 0; elem < K[part]; ++elem; @inner) {
 			// Element base index
 			const int base = elem * %d;
-			
-			// Step 1: Compute reference space derivatives using matrix operations
-			// ur = Dr * u, us = Ds * u, ut = Dt * u
-			for (int i = 0; i < %d; ++i) {
-				const int idx = base + i;
-				ur[idx] = us[idx] = ut[idx] = 0.0;
-				
-				for (int j = 0; j < %d; ++j) {
-					const int uj = base + j;
-					ur[idx] += Dr_%s[i][j] * u[uj];
-					us[idx] += Ds_%s[i][j] * u[uj];
-					ut[idx] += Dt_%s[i][j] * u[uj];
-				}
-			}
 			
 			// Step 2: Transform to physical space and compute Burgers RHS
 			for (int i = 0; i < %d; ++i) {
@@ -346,12 +338,10 @@ func (s *Burgers3DSolver) buildKernels(props element.ElementProperties) error {
 		}
 	}
 }`, rhsSignature, // 1: %s - kernel signature
-		s.Np,            // 2: %d - Element base offset
-		s.Np,            // 3: %d - Loop bounds for derivatives
-		s.Np,            // 4: %d - Inner loop for matrix multiply
 		props.ShortName, // 5: %s - Dr matrix name
 		props.ShortName, // 6: %s - Ds matrix name
 		props.ShortName, // 7: %s - Dt matrix name
+		s.Np,            // 2: %d - Element base offset
 		s.Np,            // 8: %d - Loop bounds for RHS
 	)
 
@@ -430,6 +420,7 @@ func (s *Burgers3DSolver) computeTimeStep() {
 	hMin := computeMinimumEdgeLength(s.tetMesh)
 
 	// CFL condition: dt = CFL * h / |u_max|
+	//s.dt = 0.01 * CFL * hMin / maxVel
 	s.dt = CFL * hMin / maxVel
 
 	fmt.Printf("Time step: dt = %.6f (CFL=%.2f, h_min=%.6f, u_max=%.2f)\n",
