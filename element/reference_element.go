@@ -26,6 +26,8 @@ type ElementProperties struct {
 	NEp        int                // Number of nodes per edge
 	NVp        int                // Number of vertex nodes (equals number of vertices)
 	NIp        int                // Number of strictly interior nodes
+	NFaces     int                // Number of faces in each element
+	NEdges     int                // Number of edges in each element
 	Dimensions Dimensionality     // Spatial dimension (1D, 2D, or 3D)
 }
 

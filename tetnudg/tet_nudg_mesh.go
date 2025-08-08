@@ -239,6 +239,8 @@ func (dg *TetNudgMesh) GetProperties() element.ElementProperties {
 		NEp:        len(rg.EdgePoints[0]),
 		NVp:        len(rg.VertexPoints),
 		NIp:        len(rg.InteriorPoints),
+		NFaces:     4,
+		NEdges:     6,
 		Dimensions: element.D3,
 	}
 }
